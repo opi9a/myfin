@@ -115,8 +115,6 @@ def import_txs(file, account_name, parser, accounts, categ_map):
 
     TODO:
         - add unique ID field
-        - sort columns nicerly
-        - parse date and make index
         - categorise from and to cols for 'from_to' type
         - append to any existing past tx_df (and sort etc)
         - trigger account creation for new categories
@@ -154,8 +152,8 @@ def import_txs(file, account_name, parser, accounts, categ_map):
 
         # first, from 'credit_debit' to 'net_amt'
         if parser['input_type'] == 'credit_debit':
-            raw_df['net_amt'] = raw_df['debit_amt'].subtract(raw_df['credit_amt'], fill_value=0)
-            raw_df = raw_df.drop(['debit_amt', 'credit_amt'], axis=1)
+            raw_df['net_amt'] = (raw_df['debit_amt']
+                                 .subtract(raw_df['credit_amt'], fill_value=0))
 
         # then to 'from_to', also assigning categories
         raw_df['category'] = categorise(raw_df['item'],
@@ -164,48 +162,7 @@ def import_txs(file, account_name, parser, accounts, categ_map):
         raw_df[['from', 'to']] = consol_debit_credit(raw_df, account_name)
     
     raw_df['amt'] = raw_df['net_amt'].abs()
-    raw_df = raw_df.drop(['category', 'net_amt'], axis=1) 
-    raw_df = raw_df.set_index('date')
-
-    return raw_df
-
-    """
-        
-    2. assign categories (if not 'to_from')
-
-    3. convert to 'to_from'
-
-        if 'credit_debit': convert to 'net_amt'
-
-        if 'net_amt': convert to 'to_from'
-        
-
-    Then call categorise() to assign categories based on the 'items'.
-        - uses 'categ_map', a mapping of item names to categories
-        - this is to be stored as a csv, so it can be edited, in particular
-          to assign categories to 'unknown' items
-
-    Then generate from-to amounts
-        - must generate from->to structure, when inputs are likely debit/credit
-
-    Finally create Account instances for all from or to sources not already in 
-    the list of accounts.
-    """
-
-    df = pd.read_csv(file)
-    df_out = pd.DataFrame()
-
-    account = accounts['account_name'].parser
-
-    if parser is not None:
-        df_out['date'] = df[parser['date']]
-
-        if parser['record_type'] == 'debit_credit':
-            df_out[['from'], ['to']] = consol_debit_credit(df, account_name)
-
-        df_out['item'] = df[parser['item']]
-
-    df_out['categories'] = categorise(df_out['item'])
+    df_out = raw_df[['date', 'from', 'to', 'amt', 'item']].set_index('date')
 
     return df_out
 
