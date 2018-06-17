@@ -1,54 +1,3 @@
-"""
-tx structure - pd dataframe with fields:
-
-  id
-  date
-  from
-  to
-  amount_from
-  amount_to (optional),
-  item
-  notes (may be a dict or json)
-
-where from and to can be any type of account (incl spending category)
-- that information is all associated with the account object
-Do further categorisations etc with attributes of the classes
-
-save account tx views (lazily) as csv for inspection, 
-and allow them to be edited, leading to main db also updating.
-- on startup or at user command check for changes (recursive hashing)
-through file structure
-
-sum or group across hierarchy levels
-
-importing txs
-
-support asynchronous imports of past transactions, reconciled with
-balancing transactions to ensure agreement with recorded balance
-observations
-
-input manual (?) or from a csv with reqd column headers
-
-integrate with cryptfolio, keeping price history of different assets etc
-
-- CATEGORISING TXS
-
-Key off 'items' field
-
-Look up each item in 'categ_map':
-    - a simple dict of 'item':'category' pairs
-    - load from pickle?
-    - need to inspect / amend it?  
-
-If not found then (do fuzzy lookup)
-If still not found then assign 'unknown' category
-
-User can inspect assignations, eg in a .csv, make changes,
-then call an update function to regenerate tx_df and accounts etc.
-    (is there a way to do this lazily / efficiently, rather than have to 
-    recalculate the whole damn lot?)
-"""
-
 import pandas as pd
 import numpy as np
 import os
@@ -60,6 +9,13 @@ from fuzzywuzzy import process, fuzz
 
 def load_tx(path=None):
     """Load the transactions data
+
+    Replace this with a function to load everything:
+        - past tx_df
+        - notes json
+        - list of accounts
+        - future tx_df
+        - (any rules about future that have to exist separately)
     """
 
     if path is None:
@@ -153,7 +109,7 @@ todo
         return self.name
 
 
-def import_txs(file, account_name, accounts, categ_map):
+def import_txs(file, account_name, parser, accounts, categ_map):
     """Define a general approach, but use specific parsers for each acc
         - stored in account object
 
@@ -174,6 +130,12 @@ def import_txs(file, account_name, accounts, categ_map):
 
     Also need to categorise the items to assign the partner account.
 
+    0. Load up the input data
+
+    """
+    raw_df = pd.read_csv(file)
+    """
+
     1. map columns
     
     Account instances to have attributes which dictate how they are 
@@ -191,6 +153,22 @@ def import_txs(file, account_name, accounts, categ_map):
             - 'to' and 'from' must already be categories / accounts
 
         and for all: 'date', 'notes'
+
+    """
+    # expand the 'mappings' element of parser - keys are OLD labels
+    raw_df = raw_df.rename(columns=parser['mappings'])
+    # select only the reqd columns (new labels are parser mapping values)
+    raw_df = raw_df[list(parser['mappings'].values())]
+
+    if parser['input_type'] != 'from_to':
+        if parser['input_type'] == 'credit_debit':
+            raw_df['net_amt'] = raw_df['debit_amt'].add(raw_df['credit_amt'], fill_value=0)
+            raw_df = raw_df.drop(['debit_amt', 'credit_amt'], 1)
+        raw_df['category'] = categorise(raw_df['item'], new_categ_map_path='temp_new_cat_path.csv')
+        raw_df[['from', 'to']] = consol_debit_credit(raw_df, account_name)
+    return raw_df
+
+    """
         
     2. assign categories (if not 'to_from')
 
@@ -230,6 +208,8 @@ def import_txs(file, account_name, accounts, categ_map):
 
     return df_out
 
+def map_columns(df, mapper):
+    pass
 
 def categorise(items, categ_map_path='categ_map.csv', 
                new_categ_map_path=None, fuzzymatch=False, fuzzy_threshold=80):

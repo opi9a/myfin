@@ -71,5 +71,5 @@ def test_categorise_fuzzy():
     _categorise('fuzzy')
     
 
-if __name__ == '__main__':
-    _categorise('fuzzy')
+def test_load_tx():
+    pass
