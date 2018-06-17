@@ -110,62 +110,63 @@ todo
 
 
 def import_txs(file, account_name, parser, accounts, categ_map):
-    """Define a general approach, but use specific parsers for each acc
-        - stored in account object
+    """Import raw transactions and return a tx_df in standard format,
+    with date index, and columns: from, to, amt
 
-    accounts    : the current list of account instances, from which tx 
-                  parsers can be retrieved
+    TODO:
+        - add unique ID field
+        - sort columns nicerly
+        - parse date and make index
+        - categorise from and to cols for 'from_to' type
+        - append to any existing past tx_df (and sort etc)
+        - trigger account creation for new categories
 
+    file         : the path of the raw transaction csv file
 
-    Input is df with bunch of cols, of which some relevant, but likely 
-    with wrong labels.
+    account_name : name of the account, for assignation in the 'from' and
+                   'to' columns
+                   
+    parser       : dict with instructions for processing the raw tx file
+                    - 'input_type' : 'from_to', 'credit_debit' or 'net_amt'
+                    - 'mapping'    : dict of mappings for column labels
+                                     (new labels are keys, old are values)
 
-    Also may not be in right structure. Note the input is likely to be 
-    associated with a single account, with transactions to others.
+                                     - must contain mappings to all reqd cols
 
-    Ultimately want in a 'to_from' structure, with a col for each account.
-    But could be in a 'credit_debit' form, with a column each for in and out,
-    with respect to the particular account, or a 'plus_minus' form with a
-    single column but positive for in, negative for out.
+    accounts     : the current list of account instances, from which tx 
+                   parsers can be retrieved [MAYBE - NOT CURRENTLY USED]
 
-    Also need to categorise the items to assign the partner account.
-
-    0. Load up the input data
-
-    """
-    raw_df = pd.read_csv(file)
-    """
-
-    1. map columns
-    
-    Account instances to have attributes which dictate how they are 
-    to be mapped.
-
-    That is:
-        an input_type identifier - 'credit_debit', 'net_amt' or 'to_from'
-        a col_mapper dict with the relevant mappings of column labels
-
-        if 'credit_debit': 'credit_amt', 'debit_amt' and 'item'
-
-        if 'net_amt': 'net_amt' and 'item'
-
-        if 'to_from': 'to', 'from' and 'amt'
-            - 'to' and 'from' must already be categories / accounts
-
-        and for all: 'date', 'notes'
+    categ_map    : csv file containing known mappings from 'item' to 
+                   category
 
     """
-    # expand the 'mappings' element of parser - keys are OLD labels
-    raw_df = raw_df.rename(columns=parser['mappings'])
-    # select only the reqd columns (new labels are parser mapping values)
+
+    raw_df = pd.read_csv(file, parse_dates=[parser['mappings']['date']])
+
+    # select only the columns reqd
     raw_df = raw_df[list(parser['mappings'].values())]
 
+    # map to the standard labels
+    raw_df.columns = parser['mappings'].keys()
+
+    # unless already in 'from_to', do the conversion
     if parser['input_type'] != 'from_to':
+
+        # first, from 'credit_debit' to 'net_amt'
         if parser['input_type'] == 'credit_debit':
-            raw_df['net_amt'] = raw_df['debit_amt'].add(raw_df['credit_amt'], fill_value=0)
-            raw_df = raw_df.drop(['debit_amt', 'credit_amt'], 1)
-        raw_df['category'] = categorise(raw_df['item'], new_categ_map_path='temp_new_cat_path.csv')
+            raw_df['net_amt'] = raw_df['debit_amt'].subtract(raw_df['credit_amt'], fill_value=0)
+            raw_df = raw_df.drop(['debit_amt', 'credit_amt'], axis=1)
+
+        # then to 'from_to', also assigning categories
+        raw_df['category'] = categorise(raw_df['item'],
+                                        new_categ_map_path='temp_new_cat_path.csv')
+
         raw_df[['from', 'to']] = consol_debit_credit(raw_df, account_name)
+    
+    raw_df['amt'] = raw_df['net_amt'].abs()
+    raw_df = raw_df.drop(['category', 'net_amt'], axis=1) 
+    raw_df = raw_df.set_index('date')
+
     return raw_df
 
     """
@@ -208,8 +209,6 @@ def import_txs(file, account_name, parser, accounts, categ_map):
 
     return df_out
 
-def map_columns(df, mapper):
-    pass
 
 def categorise(items, categ_map_path='categ_map.csv', 
                new_categ_map_path=None, fuzzymatch=False, fuzzy_threshold=80):
@@ -237,21 +236,16 @@ def categorise(items, categ_map_path='categ_map.csv',
             a, b = line.split(',')
             categ_map[a.lower()] = b[:-1].lower() 
 
-    print("categ_map read in:\n", categ_map)
-
     for item in items:
 
-        print('\nIn item ', item)
         # do the lookup - NB may return 'unknown' value,
         categ = categ_map.get(item.lower(), 'not found')
 
         # append result to categories for output if present in categ_map
         if categ != 'not found':
-            print('in categ found')
             categories.append(categ)
 
         elif fuzzymatch:
-            print('in fuzzymatching')
             best_match, score = process.extractOne(item, categ_map.keys(),
                                                    scorer=fuzz.token_set_ratio)
 
@@ -259,16 +253,14 @@ def categorise(items, categ_map_path='categ_map.csv',
                 categories.append(categ_map[best_match])
                 new_assigns['new_item'].append(item)
                 new_assigns['new_category'].append(categ_map[best_match])
-                print(f'Fuzzy-matched {item}, with {best_match}, scoring {score}')
-                print('categories now: ', categories)
+                print(f'Fuzzy-matched {item}, with {best_match}, scoring {score}', file='log.txt')
 
             else:
                 categories.append('unknown')
                 new_assigns['new_item'].append(item)
                 new_assigns['new_category'].append('unknown')
-                print(f'No fuzzy match for {item} (best score {score})')
+                print(f'No fuzzy match for {item} (best score {score})', file='log.txt')
         else:
-            print('not found and no fuzzy attempted')
             categories.append('unknown')
             new_assigns['new_item'].append(item)
             new_assigns['new_category'].append('unknown')
@@ -310,17 +302,9 @@ def consol_debit_credit(df_in, acc_name):
     df_out['x'] = acc_name
     df_out.columns = ['to', 'from']
     
-    for i, row in enumerate(df_in.iterrows()):
-        print(f"row {i}:")
-        print("type of row is ", type(row))
-        print("length of row is ", len(row))
-        for i,entry in enumerate(row):
-            print("type of entry is ", type(entry))
-            
-            # for j in r: print(j)
-        print("")
-        if pd.isnull(row[1][0]):
+    for row in df_in.iterrows():
+        if row[1].loc['net_amt'] < 0:
             df_out.iloc[row[0],0] = acc_name
-            df_out.iloc[row[0],1] = row[1][2]
+            df_out.iloc[row[0],1] = row[1].loc['category']
             
     return df_out[['from', 'to']]
