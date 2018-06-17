@@ -1,4 +1,6 @@
-*
-!*.py
+*.csv*
+*.ipynb*
+*.swp
+*~
 __init__.py
-!testing/*.py
+!testing/*
