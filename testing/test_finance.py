@@ -1,11 +1,10 @@
 import pandas as pd
 import os
 
-from ..finance import *
+from finance import *
 
 
 #--- SET UP TEST VARIABLES ---
-
 
 # make some items
 test_items = ['Newt Cuffs',
@@ -18,20 +17,21 @@ test_items = ['Newt Cuffs',
 new_categs = {}
 
 new_categs['normal'] = ['amphibia',
-                     'unknown',
-                     'unknown',
-                     'unknown',
-                     'unknown']  
+                        'unknown',
+                        'unknown',
+                        'unknown',
+                        'unknown']  
 
 new_categs['fuzzy'] = ['amphibia',
-                    'unknown',
-                    'unknown',
-                    'amphibia',
-                    'unknown']  
+                       'unknown',
+                       'unknown',
+                       'amphibia',
+                       'unknown']  
 
-#--- TEST FUNCTIONS ---
+#--- HELPER FUNCTIONS ---
 
 def make_categ_map(path='categs.csv'):
+    """Helper for generating a test category map csv"""
 
     # first get rid of existing versions of the file
     if os.path.isfile(path): os.remove(path)
@@ -63,6 +63,7 @@ def _categorise(fuzziness, categs_path='categs.csv'):
     assert(list(new_categ_map[0] == test_items))
     assert(list(new_categ_map[1] == new_categs[fuzziness]))
 
+#--- ACTUAL TEST FUNCTIONS ---
     
 def test_categorise_normal():
     _categorise('normal')
@@ -70,6 +71,5 @@ def test_categorise_normal():
 def test_categorise_fuzzy():
     _categorise('fuzzy')
     
-
 def test_load_tx():
     pass
