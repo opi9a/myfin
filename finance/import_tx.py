@@ -3,15 +3,13 @@ import pandas as pd
 from finance.categorise import categorise
 from finance.general import consol_debit_credit
 
-def import_tx(file, account_name, parser, accounts, categ_map):
+def import_tx(file, account_name, parser, categ_map):
     """Import raw transactions and return a tx_df in standard format,
     with date index, and columns: from, to, amt
 
     TODO:
         - add unique ID field
         - categorise from and to cols for 'from_to' type
-        - append to any existing past tx_df (and sort etc)
-        - trigger account creation for new categories
 
     file         : the path of the raw transaction csv file
 
@@ -27,9 +25,6 @@ def import_tx(file, account_name, parser, accounts, categ_map):
                                      - must contain mappings to all reqd cols:
                                        ['date', 'from', 'to', 'amt', 'item']
 
-    accounts     : the current list of account instances, from which tx
-                   parsers can be retrieved [NOT CURRENTLY USED]
-
     categ_map    : csv file containing known mappings from 'item' to
                    category
 
@@ -37,6 +32,7 @@ def import_tx(file, account_name, parser, accounts, categ_map):
     date_parser = lambda x: pd.datetime.strptime(x, parser['date_format'])
 
     raw_df = pd.read_csv(file, parse_dates=[parser['mappings']['date']],
+                         skipinitialspace=True,
                          date_parser=date_parser, dayfirst=True)
 
     # select only the columns reqd
