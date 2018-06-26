@@ -2,13 +2,12 @@ import pandas as pd
 from fuzzywuzzy import fuzz, process
 
 
-
 def categorise(items, categ_map_path='categ_map.csv',
                new_categ_map_path=None, fuzzymatch=True, fuzzy_threshold=80):
     """Returns categories for an iterable of items, based on a lookup
     in the categ_map csv.
 
-    Tries a fuzzy match if asked.
+    Tries a fuzzy match by default.
 
     Assign as 'unknown' if not found, AND add item to categ_map.csv
     with 'unknown' as value.
@@ -26,9 +25,8 @@ def categorise(items, categ_map_path='categ_map.csv',
     with open(categ_map_path) as f:
         for line in f:
             a, b = line.split(',')
-            categ_map[a.lower()] = b[:-1].lower()
+            categ_map[a.lower()] = b[:-1].lower().strip()
 
-    print("fuzzy match is", fuzzymatch)
     for item in items:
 
         # do the lookup - NB may return 'unknown' value,
