@@ -39,7 +39,6 @@ parser = dict(input_type = 'credit_debit',
                   'credit_amt': 'credit',
               })
 
-print("Parser is", parser)
 
 def init_state(df):
     
@@ -51,7 +50,8 @@ def init_state(df):
 
     # 1. save the stub of tx database to disk
     df.iloc[0:1].to_csv(txdb, date_format="%d/%m/%Y")
-    print(pd.read_csv(txdb))
+    print("Tx database stub written:\n", pd.read_csv(txdb), end="\n")
+    df = df.iloc[1:]
 
     # 2. make an input tx csv
     # want to test different import structures, and categories
@@ -87,6 +87,11 @@ def init_state(df):
     df.loc[df['t_item'] == 'tea sales'] = row
     df.loc[df['t_item'] == 'tea sales','net_amt'] *= -1
 
+    # introduce a stray space, to test stripping (currently in read_csv())
+    x = " " + str(df.loc[1,'t_item'])
+    df.loc[1,'t_item'] = x
+    print("introduced stray space: ", "'" +  df.loc[1,'t_item'] + "'")
+
     df.to_csv(new_tx, index=False)
 
 
@@ -94,31 +99,31 @@ def init_state(df):
     with open(categ_map, 'w') as f:
        f.write("item,category\n")
        f.write("Newt Cuffs,amphibiana\n")
-       f.write("tea sales, cafe income\n")
-       f.write("init_item, init_acc\n")
+       f.write("tea sales,cafe income\n")
+       f.write(" init_item,init_acc\n")
 
 
 # MAIN SEQUENCE
 
 def test_main():
+
     # set up the initial state
     df = make_df()
-    init_state(df)
-
     print('df made\n', df)
 
-    # run the function
-    # def import_tx(file, account_name, parser, accounts, categ_map):
+    init_state(df)
     print("txdb before\n", pd.read_csv(txdb))
 
-    import_tx(new_tx, 'acc 1', parser, None, categ_map).to_csv(txdb)
+    # run the function to get the imported txs
+    imported_tx = import_tx(new_tx, 'acc 1', parser, categ_map)
 
-    print("txdb after\n", pd.read_csv(txdb, index_col='date'))
+    # save to the tx file (what happened to stub??)
+    imported_tx.to_csv(txdb, mode="a", header=False)
+
+    print("txdb after\n", pd.read_csv(txdb))
 
     generated_df = pd.read_csv(txdb, index_col='date',
                        parse_dates=True, dayfirst=True)
-
-    return df, generated_df
 
     assert generated_df.equals(df)
 
