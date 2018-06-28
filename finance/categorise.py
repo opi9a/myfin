@@ -64,8 +64,15 @@ def categorise(items, categ_map_path='categ_map.csv',
     return categories
 
 
-def recategorise(txdb, categ_map_path, return_df=False, ufunc=False):
-    """Checks a tx_db against a category map and assigns as appropriate 
+def recategorise(txdb, categ_map, return_df=False, ufunc=False):
+    """Checks a tx_db against a category map and assigns categories 
+    as appropriate.  Will only apply item->category maps passed, and leaves
+    items not in the map untouched.
+
+    This means can pass a partial category map (eg only those that have been
+    changed) and only those will be applied.
+
+    Accepts a dict or csv filepath as categ_map
     
     Alternative to use ufunc or iteration. As expected, ufunc
     much faster for larger sets, but may get hard to handle, so leaving
@@ -73,7 +80,8 @@ def recategorise(txdb, categ_map_path, return_df=False, ufunc=False):
 
     """
 
-    categ_map = load_categ_map(categ_map_path)
+    if not isinstance(categ_map, dict):
+        categ_map = load_categ_map(categ_map_path)
 
     if ufunc:
         # this approach only works on items found in category map
@@ -82,7 +90,8 @@ def recategorise(txdb, categ_map_path, return_df=False, ufunc=False):
 
         # first with the 'to's
         # key step is to make a filter for 'to's in the categ map
-        to_filter = txdb['item'].isin(categ_map) & (txdb['item_from_to'] == 'to')
+        to_filter = txdb['item'].isin(categ_map) \
+                      & (txdb['item_from_to'] == 'to')
 
         # then get the column with items
         to_items = txdb.loc[to_filter, 'item']
@@ -94,7 +103,9 @@ def recategorise(txdb, categ_map_path, return_df=False, ufunc=False):
         txdb.loc[to_filter, 'to'] = new_cats
 
         # now with the 'from's
-        from_filter = txdb['item'].isin(categ_map) & (txdb['item_from_to'] == 'from')
+        from_filter = txdb['item'].isin(categ_map) \
+                        & (txdb['item_from_to'] == 'from')
+
         from_items = txdb.loc[from_filter, 'item']
         new_cats = [categ_map[x] for x in from_items]
         txdb.loc[from_filter, 'from'] = new_cats
@@ -105,9 +116,6 @@ def recategorise(txdb, categ_map_path, return_df=False, ufunc=False):
             from_to = row['item_from_to']
             new_cat = categ_map.get(row['item'], 'unknown')
             txdb.loc[ind,from_to] = new_cat
-
-    # this code returns the categories assigned, but can't change them
-    # assigned_cats = txdb.apply(lambda x: x[x['item_from_to']], axis=1)
 
     if return_df: return txdb
 
