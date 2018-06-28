@@ -51,24 +51,11 @@ todo
     statement structure / format
     """
 
-    def __init__(self, name, tx_df, input_type, col_mapper,
-                 unit=None, classification=None):
+    def __init__(self, name, tx_df, parser, unit=None, classification=None):
 
         self.name = name
-        self.classification = classification
         self.tx_df = tx_df
-
-        if input_type not in ['credit_debit', 'net_amt', 'to_from']:
-
-            print("""Need input_type to be one of:
-                  'credit_debit', 'net_amt', 'to_from'""")
-
-            self.input_type = None
-            self.col_mapper = None
-
-        else:
-            self.input_type = input_type 
-            self.col_mapper = col_mapper
+        self.parser = parser
 
         if unit == None:
             self.unit = 'goods'

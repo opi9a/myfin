@@ -12,20 +12,14 @@ def categorise(items, categ_map_path='categ_map.csv',
     Assign as 'unknown' if not found, AND add item to categ_map.csv
     with 'unknown' as value.
     """
-    # dict for reading in the category map from csv
-    categ_map = {}
+    # load the category map from csv
+    categ_map = load_categ_map(categ_map_path)
 
     # list to hold the categories to return, corresponding to items
     categories = []
 
     # new assignments to append to categ_map
     new_assigns = {'new_item':[], 'new_category':[]}
-
-    # read in csv as dict (with lower case keys for matching)
-    with open(categ_map_path) as f:
-        for line in f:
-            a, b = line.split(',')
-            categ_map[a.lower()] = b[:-1].lower().strip()
 
     for item in items:
 
@@ -68,4 +62,51 @@ def categorise(items, categ_map_path='categ_map.csv',
                   .to_csv(categ_map_path, mode='a'))
 
     return categories
+
+
+def recategorise(txdb, categ_map_path, return_df=False):
+    """Checks a tx_db against a category map and assigns as appropriate 
+    """
+    # load the category map from csv
+    categ_map = load_categ_map(categ_map_path)
+
+    # make the changes - do separately for 'from' and 'to's ('item_from_to')
+
+    # first select the relevant items for the 'to's
+    to_items = txdb.loc[txdb['item_from_to'] == 'to', 'item']
+
+    # then get the corresponding categories from the map
+    to_cats = to_items.apply(lambda x: categ_map[x])
+
+    # set the new categories
+    txdb.loc[txdb['item_from_to'] == 'to', 'to'] = to_cats
+
+    # repeat for the 'from's
+    from_items = txdb.loc[txdb['item_from_to'] == 'from', 'item']
+    from_cats = from_items.apply(lambda x: categ_map[x])
+    txdb.loc[txdb['item_from_to'] == 'from', 'from'] = from_cats
+
+    # alternative using iteration
+    # for ind, row in txdb.iterrows():
+    #     from_to = row['item_from_to']
+    #     new_cat = categ_map[row['item']]
+    #     txdb.loc[ind,from_to] = new_cat
+
+    # this code returns the categories assigned, but can't change them
+    # assigned_cats = txdb.apply(lambda x: x[x['item_from_to']], axis=1)
+
+    if return_df: return txdb
+
+
+def load_categ_map(filepath):
+    """helper function to load a category map csv, returning a dict with
+    all keys in lower case, stripped of leading / lagging whitespace.
+    """
+    categ_map = {}
+    with open(filepath) as f:
+        for line in f:
+            a, b = line.split(',')
+            categ_map[a.lower()] = b[:-1].lower().strip()
+
+    return categ_map
 
