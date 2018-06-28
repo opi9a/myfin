@@ -148,7 +148,10 @@ def test_main(return_dfs=False):
     categ_map_df.to_csv(categ_map_1)
 
     # now implement the recategorisation and test / assert
-    recat_df = recategorise(generated_df, categ_map_1, return_df=True)
+    recat_df = recategorise(generated_df, categ_map_1,
+                            ufunc=True, return_df=True)
+
+    print('\nrecat df\n', recat_df)
     assert recat_df.loc[recat_df['item'] == 'changelly', 'to'].values \
                                                             == 'crypto'
     assert recat_df.shape == generated_df.shape
