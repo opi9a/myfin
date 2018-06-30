@@ -5,7 +5,7 @@ import os
 from finance.categorise import categorise
 from finance.general import consol_debit_credit
 
-def load_new_txs(new_tx_file, txdb_file=None,
+def load_new_txs(raw_tx_path, categ_map, txdb_file=None,
                  account_name=None, parser=None,
                  return_df=False):
     """Import raw transactions and return a tx_df in standard format,
@@ -15,7 +15,7 @@ def load_new_txs(new_tx_file, txdb_file=None,
         - add unique ID field
         - categorise from and to cols for 'from_to' type
 
-    new_tx_file  : the path of the raw transaction csv new_tx_file
+    raw_tx_path  : the path of the raw transaction csv files, or list of files
     
     tx_db_file   : the path of the existing tx database. 
                    (or a new one to create)
@@ -23,7 +23,7 @@ def load_new_txs(new_tx_file, txdb_file=None,
     account_name : name of the account, for assignation in the 'from' and
                    'to' columns
 
-    parser       : dict with instructions for processing the raw tx new_tx_file
+    parser       : dict with instructions for processing the raw tx raw_tx_path
                     - 'input_type' : 'from_to', 'credit_debit' or 'net_amt'
                     - 'date_format': eg "%d/%m/%Y"
                     - 'mapping'    : dict of mappings for column labels
@@ -32,11 +32,23 @@ def load_new_txs(new_tx_file, txdb_file=None,
                                      - must contain mappings to all reqd cols:
                                        ['date', 'from', 'to', 'amt', 'item']
 
-    categ_map    : csv new_tx_file containing known mappings from 'item' to
+    categ_map    : csv raw_tx_path containing known mappings from 'item' to
                    category
 
     """
+
+    # first, if a list of files has been passed, then simply run the function on each
+    if isinstance(raw_tx_path, list):
+        for f in raw_tx_path:
+            print('loading file', f)
+            load_new_txs(f, categ_map, txdb_file, account_name, parser, return_df)
+            return
+
+    print('loading file(2)', raw_tx_path)
+    print('loading file(2)', os.path.abspath(raw_tx_path))
     if account_name is None: account_name = 'No acc given'
+
+    if txdb_file is None: txdb_file = 'new_txdb.csv'
 
     if parser is None: 
         print('Need a parser')
@@ -44,7 +56,7 @@ def load_new_txs(new_tx_file, txdb_file=None,
 
     date_parser = lambda x: pd.datetime.strptime(x, parser['date_format'])
 
-    raw_df = pd.read_csv(new_tx_file, parse_dates=[parser['mappings']['date']],
+    raw_df = pd.read_csv(raw_tx_path, parse_dates=[parser['mappings']['date']],
                          skipinitialspace=True,
                          date_parser=date_parser, dayfirst=True)
 
@@ -64,7 +76,7 @@ def load_new_txs(new_tx_file, txdb_file=None,
                                  .subtract(raw_df['credit_amt'], fill_value=0))
 
         # then to 'from_to', first assigning categories
-        raw_df['category'] = categorise(raw_df['item'])
+        raw_df['category'] = categorise(raw_df['item'], categ_map)
 
         raw_df[['from', 'to', 'item_from_to']] = \
             consol_debit_credit(raw_df, account_name)
@@ -83,12 +95,11 @@ def load_new_txs(new_tx_file, txdb_file=None,
 
     df_out['uid'] = np.arange(max_current + 1,
                               max_current + 1 + len(df_out)).astype(int)
-    # todo different if file not alreay existing
+    
+    # handle if txdb file not already existing
     if os.path.isfile(txdb_file):
-        print('exists')
         df_out.to_csv(txdb_file, mode="a", header=False, date_format="%d/%m/%Y")
     else:
-        print('not exists')
         df_out.to_csv(txdb_file, mode="w", header=True, date_format="%d/%m/%Y")
 
     if return_df: return df_out

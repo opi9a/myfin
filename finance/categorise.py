@@ -1,6 +1,42 @@
 import pandas as pd
 from fuzzywuzzy import fuzz, process
 
+"""
+ISSUE: use recategorise() for the initial categorisation, 
+       when processing new / raw transactions?
+
+categorise():
+    - takes iterable of items
+    - looks each up in categ_map
+    - three results:
+        - match -> return the category
+        - fuzzy match -> return the category
+        - no match -> return 'unknown' and append item to categ map
+
+    - key functionality:
+        - assign categories, including fuzzy and no match
+        - add new unknown categories to map
+
+recategorise():
+    - takes txdb with items and from/to categories (inc unknown)
+    - plus a categ map with *some* item -> categ mappings
+    - overwrites categories for all items in map (but not all entries in df)
+
+dealing with original categorise functionality using recategorise:
+    - make a df from the new txs, using a placeholder for category 
+        - placeholder *not* 'unknown'
+    - call function against the full category map
+    - will return for all items found (via categ map keys)
+        - [new] make it return for all items fuzzy-found?
+            - problem is in doing the initial filter (isin()),
+              which isn't obviously open to fuzzy matching
+
+    - [new] all those not found are added to categ_map with unknown assignment
+        - should be ok, can easily find these after
+
+CONCLUSION: probably not possible / worthwhile if want fuzzy matching.
+            If don't, then could be useful
+"""
 
 def categorise(items, categ_map_path='categ_map.csv',
                new_categ_map_path=None, fuzzymatch=True, fuzzy_threshold=80):
@@ -64,7 +100,8 @@ def categorise(items, categ_map_path='categ_map.csv',
     return categories
 
 
-def recategorise(txdb, categ_map, return_df=False, ufunc=False):
+def recategorise(txdb, categ_map, excl_unknowns=False,
+                        return_df=False, ufunc=False):
     """Checks a tx_db against a category map and assigns categories 
     as appropriate.  Will only apply item->category maps passed, and leaves
     items not in the map untouched.
@@ -73,15 +110,21 @@ def recategorise(txdb, categ_map, return_df=False, ufunc=False):
     changed) and only those will be applied.
 
     Accepts a dict or csv filepath as categ_map
+
+    excl_unknowns means 
     
     Alternative to use ufunc or iteration. As expected, ufunc
     much faster for larger sets, but may get hard to handle, so leaving
     iteration alternative
 
+    TODO: check all the lower() and strip() below is reqd
     """
 
     if not isinstance(categ_map, dict):
-        categ_map = load_categ_map(categ_map_path)
+        categ_map = load_categ_map(categ_map)
+
+    if excl_unknowns:
+        categ_map = {k:v for k,v in categ_map.items() if v != 'unknown'}
 
     if ufunc:
         # this approach only works on items found in category map
@@ -90,24 +133,25 @@ def recategorise(txdb, categ_map, return_df=False, ufunc=False):
 
         # first with the 'to's
         # key step is to make a filter for 'to's in the categ map
-        to_filter = txdb['item'].isin(categ_map) \
+        # - could do this with apply, for fuzzy match?
+        to_filter = txdb['item'].str.strip().str.lower().isin(categ_map) \
                       & (txdb['item_from_to'] == 'to')
 
         # then get the column with items
         to_items = txdb.loc[to_filter, 'item']
 
         # use them to get a list of categories from the map
-        new_cats = [categ_map[x] for x in to_items]
+        new_cats = [categ_map[x.lower().strip()] for x in to_items]
 
         # finally overwrite the 'to' columns
         txdb.loc[to_filter, 'to'] = new_cats
 
         # now with the 'from's
-        from_filter = txdb['item'].isin(categ_map) \
+        from_filter = txdb['item'].str.strip().str.lower().isin(categ_map) \
                         & (txdb['item_from_to'] == 'from')
 
         from_items = txdb.loc[from_filter, 'item']
-        new_cats = [categ_map[x] for x in from_items]
+        new_cats = [categ_map[x.lower().strip()] for x in from_items]
         txdb.loc[from_filter, 'from'] = new_cats
 
     else:
@@ -120,12 +164,14 @@ def recategorise(txdb, categ_map, return_df=False, ufunc=False):
     if return_df: return txdb
 
 
-def load_categ_map(filepath):
+def load_categ_map(filepath, ignore_header=True):
     """helper function to load a category map csv, returning a dict with
     all keys in lower case, stripped of leading / lagging whitespace.
     """
     categ_map = {}
     with open(filepath) as f:
+        if ignore_header:
+            f.readline()
         for line in f:
             a, b = line.split(',')
             categ_map[a.lower()] = b[:-1].lower().strip()

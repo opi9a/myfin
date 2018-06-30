@@ -121,7 +121,8 @@ def test_main(return_dfs=False):
     print("\ntxdb before\n", pd.read_csv(txdb))
 
     # run the function to import the transactions
-    load_new_txs(new_tx_file=new_tx,
+    load_new_txs(raw_tx_path=new_tx,
+                 categ_map=categ_map,
                  txdb_file=txdb,
                  account_name='acc 1',
                  parser=parser)
@@ -144,7 +145,14 @@ def test_main(return_dfs=False):
 
     # change the category map
     categ_map_df = pd.read_csv(categ_map, index_col='item')
+
+    # change one assignation
     categ_map_df.loc['changelly', 'category'] = 'crypto'
+
+    # add an unknown, which should be ignored
+    categ_map_df.loc['init_item', 'category'] = 'unknown'
+
+    # write back to disk
     categ_map_df.to_csv(categ_map_1)
 
     # now implement the recategorisation and test / assert

@@ -64,7 +64,8 @@ def consol_debit_credit(df_in, acc_name):
 
 
 def make_parser(input_type='credit_debit', date_format='%d/%m/%Y',
-                date='xdate', item='xitem', debit_amt='xdebit_amt', credit_amt='xcredit_amt'):
+                date='xdate', item='xitem', debit_amt='xdebit_amt', credit_amt='xcredit_amt',
+                net_amt='xnet_amt'):
     """Helper to generate a parser dictionary.
     """
     return dict(input_type=input_type,
@@ -72,7 +73,8 @@ def make_parser(input_type='credit_debit', date_format='%d/%m/%Y',
                 mappings=dict(date=date,
                               item=item,
                               debit_amt=debit_amt,
-                              credit_amt=credit_amt))
+                              credit_amt=credit_amt,
+                              net_amt=net_amt))
 
 
 

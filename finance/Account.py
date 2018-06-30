@@ -46,7 +46,7 @@ todo
 - projection based on assets: metaclasses of accounts
     eg Crypto, Property. Can have separate ones eg pensions.
     Net consumption comes out of..
-
+jjjjjjj
 - store a parsing function in accounts for loading transactions from standard
     statement structure / format
     """
