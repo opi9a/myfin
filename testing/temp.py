@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def make_df():
     columns=[
  'date',      'accX', 'accY', 'amt', 'item',     'id','mode']
