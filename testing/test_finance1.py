@@ -8,44 +8,37 @@ from finance.Account import Account
 # first make the target data.  Use this to generate the raw inputs, 
 # and then test them
 
-def make_df1():
+def make_df():
     columns=[
  'date',      'accX', 'accY', 'amt', 'item',     'id','mode']
 
     lines = [
-["13/01/2001",'acc1', 'cat1',  1.00, 'item1 norm', 1, -1],
-["13/01/2005",'acc1', 'cat1',  2.00, 'item1 norm', 2,  1],
-["13/01/2006",'acc1', 'cat2', -3.00, 'item2 norm', 3, -1],
-["13/01/2002",'acc1', 'acc2',  4.00, 'item1 norm', 4,  1],
-["13/01/2002",'acc2', 'acc1', -4.00, 'item1 norm', 5,  1],
-["13/01/2003",'acc1', 'cat1',  6.00, 'item1 fuzz', 6,  1],
-["13/01/2007",'acc1', 'cat2',  7.00, 'item2 norm', 7,  3]
+# first what will be the initial txdb, to which others will add, but also
+# will serve as the initial category map to look others up.
+# So want to establish an initial item->category mapping that can 
+# then also be used to test fuzzy mapping, with a slightly different item.
+["13/01/2001",'acc1', 'cat1',  1.00, 'item1 norm',  1, -1],# initial txdb
+
+# Simple new tx, looks up cat1 mapping directly 
+["13/01/2005",'acc1', 'cat1',  2.00, 'item1 norm',  2,  1],# 
+
+# A negative flow
+["13/01/2006",'acc1', 'cat2', -3.00, 'map to cat2', 3, -1],#   
+
+# A doublet of transactions
+["13/01/2002",'acc1', 'acc2',  4.00, 'item1 norm',  4,  1],#   
+["13/01/2002",'acc2', 'acc1', -4.00, 'item1 norm',  5,  1],#   
+
+# A fuzzy lookup for cat1
+["13/01/2003",'acc1', 'cat1',  6.00, 'item1 fuzz',  6,  1],#   
+["13/01/2007",'acc1', 'cat2',  7.00, 'map to cat2', 7,  3],#   
     ] 
 
     return pd.DataFrame(data=lines, columns=columns).set_index('date')
 
 
-def make_df():
-
-    df = pd.DataFrame(columns=['date', 'from', 'to', 'amt', 'item', 'item_from_to', 'uid'])
-    df.loc[0] = [pd.datetime(2009, 1, 3), 'acc 1', 'init_acc', 11.11, 'init_item', 'to', 0]
-
-    df = df.set_index('date')
-
-    df.loc[pd.datetime(2016, 12, 25)] = ['acc 1', 'amphibiana', 22.22, 'newt cuffs', 'to', 1]
-    df.loc[pd.datetime(2015, 11, 24)] = ['acc 1', 'amphibiana', 33.33, 'newt ruffs', 'to', 2]
-    df.loc[pd.datetime(2014, 10, 23)] = ['cafe income', 'acc 1', 44.44, 'tea sales', 'from', 3]
-    df.loc[pd.datetime(2013, 10, 23)] = ['acc 1', 'unknown', 55.55, 'changelly', 'to', 4]
-
-    df['uid'] = df['uid'].astype(int)
-
-    return df
-
-
 # define some file paths
 txdb='txdb.csv'
-categ_map='categ_map.csv'
-categ_map_1='categ_map_1.csv'
 new_tx='new_tx.csv'
 new_acc_name='new_acc' # at some point need name for accoun
 accounts='accounts.pkl'
