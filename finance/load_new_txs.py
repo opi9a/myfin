@@ -5,7 +5,7 @@ import os
 from finance.categorise import categorise
 from finance.general import consol_debit_credit
 
-def load_new_txs(raw_tx_path, categ_map, txdb_file=None,
+def load_new_txs(raw_tx_path, txdb_file=None,
                  account_name=None, parser=None,
                  return_df=False):
     """Import raw transactions and return a tx_df in standard format,
@@ -32,8 +32,6 @@ def load_new_txs(raw_tx_path, categ_map, txdb_file=None,
                                      - must contain mappings to all reqd cols:
                                        ['date', 'from', 'to', 'amt', 'item']
 
-    categ_map    : csv raw_tx_path containing known mappings from 'item' to
-                   category
 
     """
 
@@ -41,7 +39,7 @@ def load_new_txs(raw_tx_path, categ_map, txdb_file=None,
     if isinstance(raw_tx_path, list):
         for f in raw_tx_path:
             print('loading file', f)
-            load_new_txs(f, categ_map, txdb_file, account_name, parser, return_df)
+            load_new_txs(f, txdb_file, account_name, parser, return_df)
             return
 
     print('loading file(2)', raw_tx_path)
@@ -65,7 +63,8 @@ def load_new_txs(raw_tx_path, categ_map, txdb_file=None,
 
     # map them to the standard labels
     raw_df.columns = parser['mappings'].keys()
-    raw_df['item_from_to'] = False
+
+    return raw_df
 
     # unless already in 'from_to', do the conversion
     if parser['input_type'] != 'from_to':

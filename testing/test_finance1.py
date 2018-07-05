@@ -2,13 +2,35 @@ import pandas as pd
 import os
 
 from finance.categorise import categorise, recategorise
-from finance.load_new_txs import load_new_txs 
+from finance.load_new_txs1 import load_new_txs
 from finance.Account import Account 
 
-# first make the target data.  Use this to generate the raw inputs, 
-# and then test them
+"""
+First make a target df for the expected result after processing.
 
-def make_df():
+Use this to back-create the raw inputs for the functions and tests. Those are:
+    1. an initial tx_db.csv, with one or more categorisations made
+    2. a new_tx1.csv in 'credit_debit' form, with categorisations reqd
+        - some fuzzy 
+        - some negative flows
+    3. a new_tx2.csv in 'net_amt' form
+
+Then run load_new_txs() for each new_tx.csv
+
+Test that df generated is same as the target df.
+
+Change the categorisation of one item and call recategorise() or similar
+
+"""
+
+# first define some file paths
+txdb='txdb.csv'
+new_tx1='new_tx1.csv'
+new_tx2='new_tx2.csv'
+new_acc_name='new_acc' # at some point need name for accoun
+accounts='accounts.pkl'
+
+def make_target_df():
     columns=[
  'date',      'accX', 'accY', 'amt', 'item',     'id','mode']
 
@@ -25,23 +47,21 @@ def make_df():
 # A negative flow
 ["13/01/2006",'acc1', 'cat2', -3.00, 'map to cat2', 3, -1],#   
 
-# A doublet of transactions
+# Will test for handling a doublet of transactions
 ["13/01/2002",'acc1', 'acc2',  4.00, 'item1 norm',  4,  1],#   
 ["13/01/2002",'acc2', 'acc1', -4.00, 'item1 norm',  5,  1],#   
 
 # A fuzzy lookup for cat1
 ["13/01/2003",'acc1', 'cat1',  6.00, 'item1 fuzz',  6,  1],#   
 ["13/01/2007",'acc1', 'cat2',  7.00, 'map to cat2', 7,  3],#   
+
+# Some transactions for acc2
+["13/02/2007",'acc2', 'cat2', 17.00, 'item1 norm', 8,  1],#   
+["13/02/2007",'acc2', 'cat2', 27.00, 'item1 fuzz', 9,  1],#   
     ] 
 
     return pd.DataFrame(data=lines, columns=columns).set_index('date')
 
-
-# define some file paths
-txdb='txdb.csv'
-new_tx='new_tx.csv'
-new_acc_name='new_acc' # at some point need name for accoun
-accounts='accounts.pkl'
 
 # will need a parser 
 parser = dict(input_type = 'credit_debit',
@@ -49,74 +69,49 @@ parser = dict(input_type = 'credit_debit',
               mappings = {
                   'date': 't_date',
                   'item': 't_item',
-                  'debit_amt': 'debit',
-                  'credit_amt': 'credit',
+                  'debit_amt': 't_debit',
+                  'credit_amt': 't_credit',
               })
 
+def init_csvs(df):
+    """Creates three csv files from an input txdb df:
+        - a 'stub' txdb
+        - a new_tx1.csv with acc1 txs in 'credit_debit' format
+        - a new_tx2.csv with acc2 txs in 'net_amt' format
 
-def init_state(df):
-    
+    """
+
     # 0. delete any extant files
     if os.path.isfile(txdb): os.remove(txdb)
-    if os.path.isfile(categ_map): os.remove(categ_map)
-    if os.path.isfile(new_tx): os.remove(new_tx)
-    if os.path.isfile(accounts): os.remove(accounts)
+    if os.path.isfile(new_tx1): os.remove(new_tx1)
+    if os.path.isfile(new_tx2): os.remove(new_tx2)
+    # if os.path.isfile(accounts): os.remove(accounts)
 
-    # 1. save the stub of tx database to disk
-    df.iloc[0:1].to_csv(txdb, date_format="%d/%m/%Y")
-    print("Tx database stub written:\n", pd.read_csv(txdb), end="\n")
+    # first save the stub used for the txdb
+    df.iloc[0:1,:].to_csv(txdb)
 
-    # drop that row
-    df = df.iloc[1:]
+    # make a copy of acc1 txs, and drop the line that's already been used
+    new_tx1_df = df[df['accX'] == 'acc1'].iloc[1:,:].copy()
 
-    # 2. make an input tx csv
-    # want to test different import structures, and categories
-    
-    # do the import structures by using full set of possible columns 
-    # (only desired ones are selected anyway)
-    # do categories by having rows so that there is at least one item
-    #  that gets found, one that can't be, and one fuzzy matchable
+    # make columns for tx going in and out of the account
+    new_tx1_df['debit'] = new_tx1_df.loc[new_tx1_df['amt'] > 0, 'amt']
+    new_tx1_df['credit'] = new_tx1_df.loc[new_tx1_df['amt'] < 0, 'amt'] *-1
 
-    # change date format
-    # change column labels for date, item
-    # make colums for debit, credit, net_amt
+    # select reqd columns and rename, so they have to be renamed when importing
+    new_tx1_df = new_tx1_df[['item', 'debit', 'credit']].reset_index()
+    new_tx1_df.columns = ['t_'+x for x in new_tx1_df.columns]
 
+    # save to disk
+    new_tx1_df.to_csv(new_tx1, index=False)
 
-    df = df.copy().drop(['from', 'to', 'item_from_to'], axis=1).reset_index()
-    df['date'] = df['date'].apply(lambda x:
-                              pd.datetime.strftime(x, parser['date_format']))
-    df.columns = ['t_' + x for x in df.columns]
-    print('df columns now')
+    # make a copy of acc2 txs
+    new_tx2_df = df[df['accX'] == 'acc2'].copy()
 
-    df = df.rename(columns = {'t_amt':'net_amt'})
-    df['debit'] = df['net_amt']
-    df['credit'] = 'n/a'
-    df['net_amt'] *= -1
+    # select and rename columns
+    new_tx2_df = new_tx2_df[['item', 'amt']].reset_index()
+    new_tx2_df.columns=[['t_date','t_item', 't_net_amt']]
 
-
-    # tea sales row is income - swap credit/debit and make net_amt positive
-    row = df.loc[df['t_item'] == 'tea sales'].copy()
-    deb_temp = row.loc[:,'debit'].copy()
-    cred_temp = row.loc[:,'credit'].copy()
-    row.loc[:,'credit'] = deb_temp
-    row.loc[:,'debit'] = cred_temp
-    df.loc[df['t_item'] == 'tea sales'] = row
-    df.loc[df['t_item'] == 'tea sales','net_amt'] *= -1
-
-    # introduce a stray space, to test stripping (currently in read_csv())
-    x = " " + str(df.loc[1,'t_item'])
-    df.loc[1,'t_item'] = x
-    # print("introduced stray space: ", "'" +  df.loc[1,'t_item'] + "'")
-
-    df.to_csv(new_tx, index=False)
-
-
-    # 3. make a category map
-    with open(categ_map, 'w') as f:
-       f.write("item,category\n")
-       f.write("Newt Cuffs,amphibiana\n")
-       f.write("tea sales,cafe income\n")
-       f.write("init_item,init_acc\n")
+    new_tx2_df.to_csv(new_tx2, index=False)
 
 
 # MAIN SEQUENCE
@@ -124,18 +119,22 @@ def init_state(df):
 def test_main(return_dfs=False):
 
     # set up the initial state
-    df = make_df()
+    df = make_target_df()
     print('df made\n', df)
 
-    init_state(df)
+    init_csvs(df)
     print("\ntxdb before\n", pd.read_csv(txdb))
 
+    assert pd.read_csv(txdb).shape == (1,7)
+    assert pd.read_csv(new_tx1).shape == (5,4)
+    assert pd.read_csv(new_tx2).shape == (3,3)
+
     # run the function to import the transactions
-    load_new_txs(raw_tx_path=new_tx,
-                 categ_map=categ_map,
-                 txdb_file=txdb,
-                 account_name='acc 1',
-                 parser=parser)
+    load_output = load_new_txs(raw_tx_path=new_tx1,
+                              txdb_file=txdb,
+                              account_name='acc1',
+                              parser=parser)
+    print('output of load_new_txs():', load_output)
 
     # TODO now is the time to check for any new accounts to create
 
@@ -143,7 +142,7 @@ def test_main(return_dfs=False):
     generated_df = pd.read_csv(txdb, index_col='date',
                        parse_dates=True, dayfirst=True)
 
-    print("\ntxdb after x\n", generated_df)
+    print("\ntxdb after loading\n", generated_df)
 
     # assert False
     assert generated_df.equals(df)
