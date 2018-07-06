@@ -13,7 +13,7 @@ categorise():
         - no match -> return 'unknown'
 
 """
-def categorise1():
+def categorise1(items, txdb, account, fuzzymatch=True, fuzzy_threshold=80):
     """
     - take items column of new_tx df
     - use df.apply with get_category, and the txdb to generate categories
@@ -25,8 +25,24 @@ def categorise1():
             by_item = (df.set_index(df['item'].str.lower(), drop=True)
                .sort_index()[['accY','accX','id','mode']])
 
-        - see vectorising notebook
     """
+    # organise txdb for lookup: by item, strip() lower(),  only reqd columns
+    items_df = (txdb.set_index(txdb['item'].str.lower(), drop=True)
+               .sort_index()[['accY','accX','id','mode']])
+
+    # drop unknowns
+    items_df = items_df.loc[items_df['accY'] != 'unknown']
+
+    # get results - a list of tuples
+    results = []
+    for item in items:
+        results.append(get_category(item, items_df, account,
+                                    fuzzymatch, fuzzy_threshold))
+
+    return [x[0] for x in results], [x[1] for x in results] 
+
+
+
 def get_category(item, tx_by_item, account=None, fuzzymatch=True, fuzzy_threshold=80):
     """Looks up category for a single item in a tx df that has been organised
     by item (lower case and stripped). Also should get rid of unknows first
@@ -54,7 +70,7 @@ def get_category(item, tx_by_item, account=None, fuzzymatch=True, fuzzy_threshol
     if tx_by_item.index.contains(item):
         item_df = tx_by_item.loc[[item],:]
 
-        # make a sub_df of hits with mode -1
+        # make a sub_df of hits manually assigned (i.e. with mode -1)
         assigned_hits = item_df.loc[item_df['mode'] == -1]
 
         # if only one, return it
@@ -79,9 +95,9 @@ def get_category(item, tx_by_item, account=None, fuzzymatch=True, fuzzy_threshol
 
 
         # if pasting from above, remember to change mode (from -1)
-        # as well as unassigned-->ununassigned
+        # as well as assigned-->unassigned
 
-        # make a sub_df of hits with mode > -1
+        # make a sub_df of hits not manually assigned (i.e. mode > -1)
         unassigned_hits = item_df.loc[item_df['mode'] > -1]
 
         if len(unassigned_hits) == 1:
@@ -107,10 +123,11 @@ def get_category(item, tx_by_item, account=None, fuzzymatch=True, fuzzy_threshol
 
         # just return the first - so works if single or multiple
         if score >= fuzzy_threshold:
-            return (tx_by_item.loc[[best_match],'accY'][0],
-                    tx_by_item.loc[[best_match],'id'][0])
+            return (tx_by_item.loc[[best_match],'accY'].iloc[0],
+                    tx_by_item.loc[[best_match],'id'].iloc[0])
 
-    return 'unknown'
+    # if nothing's returned by now, there's no match
+    return 'unknown', 0
 
 
 
