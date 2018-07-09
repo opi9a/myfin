@@ -87,18 +87,43 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     if return_df: return df_out
 
 
-def update_category(item, accX, old_accY, new_accY, txdf):
-    """Update the assignation of accY category in txdf for rows labelled item:
-        - find rows of item associated with accX (or all, if accX is none),
-          with old_accY as accY (or all if old_accY is none)
-        - overwrite accY with new_accY 
 
-        Remember the input item will be lower()ed and stripp()ed
+def cumulate_masks(masklist, current_mask=True):
+    """Generates a cumulated boolean mask for an arbitrary dataframe
+    from a list of masks
     """
-    # 1. get the txdf selection
-    mask =    (txdf['item'].str.lower().str.strip() == item) \
-            & (txdf['accX'] == accX)                         \
-            & (txdf['accY'] == old_accY)
+    if masklist:
+        current_mask = current_mask & masklist.pop()
+        return cumulate_masks(masklist, current_mask)
+    else:
+        return current_mask
 
-    select_df = txdf.loc[mask]
 
+def edit_tx(df, target_col, new_val,
+            itemise=True, return_df=False, **kwargs):
+    """Edits transactions of an input df.
+
+    target_col  : the column to be edited
+
+    new_val     : the value to be inserted on selected locations
+
+    kwargs      : column-based selections, eg accX='acc1'
+
+    itemise     : if item is passed, probably want to select on the basis of 
+                  lower()ed and strip()ped item strings - which happens
+                  if itemise is True
+    """
+    
+    # if need to compare against lower()ed strip()ped item, have to prepare
+    if itemise and 'item' in kwargs:
+        init_mask = df['item'].str.lower().str.strip() == kwargs['item'].lower()
+        del kwargs['item']
+    else: 
+        init_mask = True
+        
+    # now the main logic - make the mask list, then cumulate them
+    masklist = [df[k] == kwargs[k] for k in kwargs]
+    mask = cumulate_masks(masklist, init_mask)
+    df.loc[mask, target_col] = new_val
+
+    if return_df: return df
