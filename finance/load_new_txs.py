@@ -38,8 +38,9 @@ def load_new_txs(new_tx_paths, txdb_path, unknowns_path,
 
     new_tx_df = pd.concat([pd.read_csv(f, parse_dates=[parser['map']['date']],
                                           skipinitialspace=True,
-                                          date_parser=date_parser, dayfirst=True)
-                                       for f in new_tx_paths])
+                                          date_parser=date_parser,
+                                          dayfirst=True)
+                           for f in new_tx_paths])
 
 
     # 2. organise columns using parser
