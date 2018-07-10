@@ -35,8 +35,8 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     # 1. aggregate input csvs to a single df
     date_parser = lambda x: pd.datetime.strptime(x, parser['date_format'])
     raw_df = pd.concat([pd.read_csv(f, parse_dates=[parser['mappings']['date']],
-                                    skipinitialspace=True,
-                                    date_parser=date_parser, dayfirst=True)
+                                       skipinitialspace=True,
+                                       date_parser=date_parser, dayfirst=True)
                                     for f in new_tx_paths])
 
     # 2. organise columns using parser
@@ -60,7 +60,7 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     # 5. add id and account name columns to make output df
     max_current = int(pd.read_csv(txdb_path)['id'].max())
     raw_df['id'] = np.arange(max_current + 1,
-                              max_current + 1 + len(raw_df)).astype(int)
+                             max_current + 1 + len(raw_df)).astype(int)
 
     raw_df['accX'] = account_name
 
@@ -77,53 +77,64 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     # 7. write out unknowns to unknowns.csv
     unknowns_df = df_out.loc[df_out['accY'] == 'unknown']
     unknowns_df = itemise(unknowns_df, drop_unknowns=False)
-    unknowns_df = unknowns_df[['accX','accY']]
+    unknowns_df = unknowns_df[['accX','accY']].reset_index()
 
-    if os.path.isfile(unknowns_path):
-        unknowns_df.to_csv(unknowns_path, mode="a", header=False)
-    else:
-        unknowns_df.to_csv(unknowns_path, mode="w", header=True)
+    existing_unknowns = pd.read_csv(unknowns_path)
+
+    unknowns_out = pd.concat([existing_unknowns, unknowns_df]).drop_duplicates() 
+    unknowns_out.to_csv(unknowns_path, index=False)
 
     if return_df: return df_out
 
 
+def update_unknowns(unknowns_path, txdb=None, txdb_path=None):
+    """IN PROGRESS
+    Take a csv file of unknowns for which some have had accY
+    categories manually completed.
 
-def cumulate_masks(masklist, current_mask=True):
-    """Generates a cumulated boolean mask for an arbitrary dataframe
-    from a list of masks
+    For those that are completed, update the relevant fields in a txdb. 
+
+    Delete from the unknowns csv
     """
-    if masklist:
-        current_mask = current_mask & masklist.pop()
-        return cumulate_masks(masklist, current_mask)
-    else:
-        return current_mask
+
+    unknowns = pd.read_csv(unknowns_path, index_col='item')
+
+    to_edit = unknowns.loc[unknowns['accY'] != 'unknown']
+    for tx in to_edit.index:
+        print(tx)
+        edit_tx(txdb, 'accY', to_edit.loc[tx,'accY'], item=tx, accX='acc1')
+
+    return txdb
 
 
-def edit_tx(df, target_col, new_val,
-            itemise=True, return_df=False, **kwargs):
-    """Edits transactions of an input df.
+def edit_tx(df, target_col, new_val, masks, return_df=False):
+    """Edits transactions of an input df by selection based on columns
 
     target_col  : the column to be edited
 
-    new_val     : the value to be inserted on selected locations
+    new_val     : the value to be inserted at selected fields
 
-    kwargs      : column-based selections, eg accX='acc1'
+    masks       : a list of boolean df masks to apply to select rows
 
-    itemise     : if item is passed, probably want to select on the basis of 
-                  lower()ed and strip()ped item strings - which happens
-                  if itemise is True
+                - eg [df['item'].str.lower().strip() == 'newt cuffs',
+                      df['accY'] == 'groceries',
+                      df['amt'] >= 100,
+                      df['id'] < 999,
+                      df['mode'] == -1,
+                      ]
+
+    The passed list of masks is aggregated with successively overlays,
+    to give a cumulative mask applied to the df to select rows for editing.
     """
-    
-    # if need to compare against lower()ed strip()ped item, have to prepare
-    if itemise and 'item' in kwargs:
-        init_mask = df['item'].str.lower().str.strip() == kwargs['item'].lower()
-        del kwargs['item']
-    else: 
-        init_mask = True
+
+    mask = True
         
-    # now the main logic - make the mask list, then cumulate them
-    masklist = [df[k] == kwargs[k] for k in kwargs]
-    mask = cumulate_masks(masklist, init_mask)
+    for m in masks:
+        mask = mask & m
+
+    # finally overwrite the selection
     df.loc[mask, target_col] = new_val
 
     if return_df: return df
+
+
