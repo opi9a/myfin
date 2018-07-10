@@ -79,7 +79,10 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     unknowns_df = itemise(unknowns_df, drop_unknowns=False)
     unknowns_df = unknowns_df[['accX','accY']].reset_index()
 
-    existing_unknowns = pd.read_csv(unknowns_path)
+    if os.path.isfile(unknowns_path):
+        existing_unknowns = pd.read_csv(unknowns_path)
+    else:
+        existing_unknowns = None
 
     unknowns_out = pd.concat([existing_unknowns, unknowns_df]).drop_duplicates() 
     unknowns_out.to_csv(unknowns_path, index=False)
@@ -87,9 +90,8 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     if return_df: return df_out
 
 
-def update_unknowns(unknowns_path, txdb=None, txdb_path=None):
-    """IN PROGRESS
-    Take a csv file of unknowns for which some have had accY
+def update_unknowns(unknowns_path, account, txdb=None, txdb_path=None):
+    """Take a csv file of unknowns for which some have had accY
     categories manually completed.
 
     For those that are completed, update the relevant fields in a txdb. 
@@ -97,14 +99,31 @@ def update_unknowns(unknowns_path, txdb=None, txdb_path=None):
     Delete from the unknowns csv
     """
 
+    if txdb is None:
+        if txdb_path is None:
+            print('need a txdb or a path')
+            return 1
+        else:
+            txdb = pd.read_csv(txdb_path, index_col='date')
+
     unknowns = pd.read_csv(unknowns_path, index_col='item')
 
     to_edit = unknowns.loc[unknowns['accY'] != 'unknown']
-    for tx in to_edit.index:
-        print(tx)
-        edit_tx(txdb, 'accY', to_edit.loc[tx,'accY'], item=tx, accX='acc1')
 
+    base_masklist = [txdb['accX'] == account,
+                     txdb['accY'] == 'unknown']
+
+    for tx in to_edit.index:
+        masks = base_masklist + [txdb['item'].str.lower().str.strip() == tx]
+        new_val = to_edit.loc[tx,'accY'] 
+        edit_tx(df=txdb, target_col='accY', new_val=new_val, masks=masks)
+
+    unknowns.loc[unknowns['accY'] == 'unknown'].to_csv(unknowns_path)
+
+    if txdb_path is not None:
+        txdb.to_csv(txdb_path)
     return txdb
+
 
 
 def edit_tx(df, target_col, new_val, masks, return_df=False):
