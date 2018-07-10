@@ -6,7 +6,7 @@ def categorise(items, account, txdb=None, cat_db=None, fuzzymatch=True, fuzzy_th
     """
     - take iterable of items - eg column of new_tx df
     - iterate over items (df.apply is not faster), generating matches
-      (and the id of the match, --> mode) vs a ref db by calling get_category()
+      (and the id of the match, --> mode) vs a ref db
       - ref db is really a view of passed txdb, processed as follows:
             - index by items, after applying strip() and lower()
             - columns for both accounts, id and mode
@@ -68,26 +68,26 @@ def itemise(txdb, drop_unknowns=True):
                          'accY', 'accX', 'id', 'mode')
     """
     
-    itemised = txdb.set_index(txdb['item'].str.lower(), drop=False)
+    itemised = txdb.set_index(txdb['item'].str.lower().str.strip(), drop=False)
 
     if drop_unknowns:
-        itemised = itemised.loc[itemised['accY'] != 'unknown'].drop('item', axis=1)
-
+        itemised = itemised.loc[itemised['accY'] != 'unknown'].drop('item',
+                                                                        axis=1)
     return itemised
 
 
-def pick_match(item, account, sub_df):
+def pick_match(item, account, matches):
     """Returns match for item in sub_df of matches, giving preference for hits
     in home account
     """
     # if only one match, return it
-    if len(sub_df) == 1:
-        return (sub_df.loc[item,'accY'],
-                sub_df.loc[item,'id'])
+    if len(matches) == 1:
+        return (matches.loc[item,'accY'],
+                matches.loc[item,'id'])
     
     # if more than one, look for a hit in home account
-    if len(sub_df) > 1:
-        home_acc_hits = sub_df[sub_df['accX']==account]
+    if len(matches) > 1:
+        home_acc_hits = matches[matches['accX']==account]
 
         # if any home hits, return the first - works even if multiple
         if len(home_acc_hits) > 0:
@@ -96,6 +96,6 @@ def pick_match(item, account, sub_df):
 
         # if no home account hits, just return the first assigned hit
         else:
-            return (sub_df.iloc[0].loc['accY'], 
-                    sub_df.iloc[0].loc['id'])
+            return (matches.iloc[0].loc['accY'], 
+                    matches.iloc[0].loc['id'])
 

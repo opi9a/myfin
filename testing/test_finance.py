@@ -1,8 +1,8 @@
 import pandas as pd
 import os
 
-from finance.categorise import categorise, recategorise
-from finance.load_new_txs1 import load_new_txs
+from finance.categorise import categorise
+from finance.load_new_txs import load_new_txs
 from finance.Account import Account 
 
 """
