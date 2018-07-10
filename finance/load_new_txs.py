@@ -5,9 +5,8 @@ import os
 from finance.categorise import categorise, itemise
 from finance.general import consol_debit_credit
 
-def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
-                 account_name=None, parser=None,
-                 return_df=False):
+def load_new_txs(new_tx_paths, txdb_path, unknowns_path,
+                 account_name, parser, return_df=False):
 
     """Import raw transactions and return a tx_df in standard format,
     with date index, and columns: from, to, amt
@@ -21,53 +20,62 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
                    'to' columns
 
     parser       : dict with instructions for processing the raw tx raw_tx_path
-                    - 'input_type' : 'from_to', 'credit_debit' or 'net_amt'
+                    - 'input_type' : 'credit_debit' or 'net_amt'
                     - 'date_format': eg "%d/%m/%Y"
-                    - 'mapping'    : dict of mappings for column labels
+                    - 'map'        : dict of map for column labels
                                      (new labels are keys, old are values)
 
-                                     - must contain mappings to all reqd cols:
-                                       ['date', 'from', 'to', 'amt', 'item']
+                 - mapping must cover following columns (i.e. new labels):
+                   - net_amt: ['date', 'accX', 'accY', 'net_amt', 'item']
+                   - credit_debit: 'debit_amt', 'credit_amt' replace 'net_amt'
 
 
     """
 
     # 1. aggregate input csvs to a single df
+
     date_parser = lambda x: pd.datetime.strptime(x, parser['date_format'])
-    raw_df = pd.concat([pd.read_csv(f, parse_dates=[parser['mappings']['date']],
-                                       skipinitialspace=True,
-                                       date_parser=date_parser, dayfirst=True)
-                                    for f in new_tx_paths])
+
+    new_tx_df = pd.concat([pd.read_csv(f, parse_dates=[parser['map']['date']],
+                                          skipinitialspace=True,
+                                          date_parser=date_parser, dayfirst=True)
+                                       for f in new_tx_paths])
+
 
     # 2. organise columns using parser
-    raw_df = raw_df[list(parser['mappings'].values())]
-    raw_df.columns = parser['mappings'].keys()
+    
+    new_tx_df = new_tx_df[list(parser['map'].values())]
+    new_tx_df.columns = parser['map'].keys()
 
     # for credit_debits, make a 'net_amt' column
     if parser['input_type'] == 'credit_debit':
-        raw_df['net_amt'] = (raw_df['debit_amt']
-                             .subtract(raw_df['credit_amt'], fill_value=0))
+        new_tx_df['net_amt'] = (new_tx_df['debit_amt']
+                             .subtract(new_tx_df['credit_amt'], fill_value=0))
         
+
     # 3. read in txdb from csv
-    # TODO - handle case if file absent
-    txdb = pd.read_csv(txdb_path, index_col='date')
+    if os.path.isfile(txdb_path):
+        txdb = pd.read_csv(txdb_path, index_col='date')
+    else: txdb = None
+
 
     # 4. call categorise() to get accY and mode columns,
-    categ_out = categorise(raw_df['item'], account=account_name, txdb=txdb)
-    raw_df['accY'] = [x[0] for x in categ_out]
-    raw_df['mode'] = [x[1] for x in categ_out]
+    categ_out = categorise(new_tx_df['item'], account=account_name, txdb=txdb)
+    new_tx_df['accY'] = [x[0] for x in categ_out]
+    new_tx_df['mode'] = [x[1] for x in categ_out]
+
 
     # 5. add id and account name columns to make output df
     max_current = int(pd.read_csv(txdb_path)['id'].max())
-    raw_df['id'] = np.arange(max_current + 1,
-                             max_current + 1 + len(raw_df)).astype(int)
+    new_tx_df['id'] = np.arange(max_current + 1,
+                             max_current + 1 + len(new_tx_df)).astype(int)
 
-    raw_df['accX'] = account_name
+    new_tx_df['accX'] = account_name
 
-    df_out = (raw_df[['date', 'item', 'accX', 'accY', 'net_amt', 'mode',
-                      'id']] .set_index('date'))
+    df_out = (new_tx_df[['date', 'accX', 'accY', 'net_amt', 'item', 'id',
+                      'mode']] .set_index('date'))
     
-    # 6. append to csv on disk - handle if txdb file not already existing
+    # 6. append to csv on disk - just write if txdb file not existing
     if os.path.isfile(txdb_path):
         df_out.to_csv(txdb_path, mode="a", header=False, date_format="%d/%m/%Y")
     else:
@@ -84,13 +92,15 @@ def load_new_txs(new_tx_paths, txdb_path=None, unknowns_path=None,
     else:
         existing_unknowns = None
 
+    # write out the whole df, dropping duplicates
     unknowns_out = pd.concat([existing_unknowns, unknowns_df]).drop_duplicates() 
     unknowns_out.to_csv(unknowns_path, index=False)
 
     if return_df: return df_out
 
 
-def update_unknowns(unknowns_path, account, txdb=None, txdb_path=None):
+def update_unknowns(unknowns_path, account, txdb=None, txdb_path=None,
+                    return_df=False):
     """Take a csv file of unknowns for which some have had accY
     categories manually completed.
 
@@ -122,7 +132,9 @@ def update_unknowns(unknowns_path, account, txdb=None, txdb_path=None):
 
     if txdb_path is not None:
         txdb.to_csv(txdb_path)
-    return txdb
+
+    if return_df:
+        return txdb
 
 
 
