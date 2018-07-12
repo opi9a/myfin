@@ -2,100 +2,110 @@ import pandas as pd
 from fuzzywuzzy import fuzz, process
 
     
-def categorise(items, account, txdb=None, cat_db=None, fuzzymatch=True, fuzzy_threshold=80):
+def categorise(ITEMs, account, tx_db=None, cat_db=None, unknowns_db=None, fuzzy_db=None,
+               fuzzymatch=True, fuzzy_threshold=80):
     """
     - take iterable of items - eg column of new_tx df
     - iterate over items (df.apply is not faster), generating matches
       (and the id of the match, --> mode) vs a ref db
-      - ref db is really a view of passed txdb, processed as follows:
+      - ref db is really a view of passed tx_db, processed as follows:
             - index by items, after applying strip() and lower()
             - columns for both accounts, id and mode
     - returns two lists, for the matched categories and the ids
 
     """
-    if txdb is None and cat_db is None:
-        print("need a txdb and/or a cat_db")
-        return 1
 
-    # organise txdb for lookup by item (lower, stripped, no 'unknown's)
-    txdb_by_item = itemise(txdb)[['accY','accX','id','mode']]
+    # print('unknowns_db', unknowns_db, end='\n\n')
+    # print('cat_db', cat_db, end='\n\n')
+    # print('tx_db', tx_db, end='\n\n')
+    print('fuzzy_db', fuzzy_db, end='\n\n')
+
 
     # get results - a list of tuples
     results = []
-    for item in items:
+    for ITEM in ITEMs:
+        print("\nnow with item:", ITEM)
 
-        item = item.lower().strip()
+        _item = ITEM.lower().strip()
 
-        if txdb_by_item.index.contains(item):
-            item_subdf = txdb_by_item.loc[[item],:]
+        # 1. check in unknowns_db   -> append ('unknown', -1) <old unknown>
+        # 2. check in cat_db        -> append (<hit>,      1) <known>
+        # 3. check in fuzzy_db      -> append (<hit>,      2) <old fuzzy>
+        # 4. fuzzy match on tx_db   -> append (<hit>,      3) <new fuzzy>
+        # 5. just assign 'unknown'  -> append ('unknown',  0) <new unknown>
 
-            # 1. try assigned hits in txdb
-            assigned_hits = item_subdf.loc[item_subdf['mode'] == -1]
-            if len(assigned_hits) > 0:
-                results.append(pick_match(item, account, assigned_hits))
-                continue
+        # pass dbs to this function in RAM for lookups
+        # return assignments and modes tuples (in a list)
+        # don't append to dbs - do all at once later in load_new_tx(),
+        # based on the modes assigned to the new_txs
 
-            # 2. try unassigned hits in txdb
-            unassigned_hits = item_subdf.loc[item_subdf['mode'] > -1]
-            if len(unassigned_hits) > 0:
-                results.append(pick_match(item, account, unassigned_hits))
-                continue
+        # 1. check in unknowns_db   -> append ('unknown', -1) <old unknown>
+        if unknowns_db.index.contains(_item):
+            print('unknown\n')
+            results.append(('unknown', -1))
+            print(results[-1])
+            continue
 
-        # 3. try fuzzy match - test against whole index
+        # 2. check in cat_db        -> append (<hit>,      1) <known>
+        if cat_db.index.contains(_item):
+            print('a known hit')
+            hits = cat_db.loc[[_item]]
+            results.append((pick_match(_item, account, hits), 1))
+            print(results[-1])
+            continue
+
+        # 3. check in fuzzy_db      -> append (<hit>,      2) <old fuzzy>
+        if fuzzy_db.index.contains(ITEM):
+            print('a fuzzy hit')
+            hits = fuzzy_db.loc[[ITEM]]
+            results.append((pick_match(_item, account, hits, return_col='match_accY'), 2))
+            print(results[-1])
+            continue
+
+        # 4. fuzzy match on tx_db   -> append (<hit>,      3) <new fuzzy>
         if fuzzymatch:
-            best_match, score = process.extractOne(item, txdb_by_item.index,
+            print('trying a fuzzy match')
+            best_match, score = process.extractOne(ITEM, tx_db['ITEM'].values,
                                                    scorer=fuzz.token_set_ratio)
-
-            # just return the first - so works if single or multiple
+            print(best_match, score)
             if score >= fuzzy_threshold:
-                results.append((txdb_by_item.loc[[best_match],'accY'].iloc[0],
-                                txdb_by_item.loc[[best_match],'id'].iloc[0]))
+                # get a subdf of the best match
+                hits = tx_db.loc[tx_db['ITEM']==best_match].set_index('ITEM')
+                res = pick_match(best_match, account, hits)
+                print('res', res)
+                print('hits', hits)
+                results.append((res, 3))
+                new_match_accX = hits.loc[best_match, 'accX']
+                new_match_id = hits.loc[best_match, 'id']
+                print('fuzzy db before', fuzzy_db)
+                fuzzy_db.loc[ITEM] = [account, best_match,
+                                      new_match_accX, res, new_match_id] 
+                print(results[-1])
                 continue
 
-        # 4. if nothing's returned by now, there's no match
+        # 5. just assign 'unknown'  -> append ('unknown',  0) <new unknown>
         results.append(('unknown', 0))
 
     # return [x[0] for x in results], [x[1] for x in results] 
     return results
 
-
-def itemise(txdb, drop_unknowns=True):
-    """Reorganises a tx dataframe to support querying for category by item:
-        - apply strip() and lower() to 'item' field
-        - set 'item' as index
-
-    Returns all columns (doesn't apply a selection, eg for just
-                         'accY', 'accX', 'id', 'mode')
-    """
-    
-    itemised = txdb.set_index(txdb['item'].str.lower().str.strip(), drop=False)
-
-    if drop_unknowns:
-        itemised = itemised.loc[itemised['accY'] != 'unknown'].drop('item',
-                                                                        axis=1)
-    return itemised
-
-
-def pick_match(item, account, matches):
-    """Returns match for item in sub_df of matches, giving preference for hits
+def pick_match(item, account, hits, return_col='accY'):
+    """Returns match for item in sub_df of hits, giving preference for hits
     in home account
     """
     # if only one match, return it
-    if len(matches) == 1:
-        return (matches.loc[item,'accY'],
-                matches.loc[item,'id'])
+    if len(hits) == 1:
+        return hits.loc[item,return_col]
     
     # if more than one, look for a hit in home account
-    if len(matches) > 1:
-        home_acc_hits = matches[matches['accX']==account]
+    if len(hits) > 1:
+        home_acc_hits = hits[hits['accX']==account]
 
         # if any home hits, return the first - works even if multiple
         if len(home_acc_hits) > 0:
-            return (home_acc_hits.iloc[0].loc['accY'], 
-                    home_acc_hits.iloc[0].loc['id'])
+            return home_acc_hits.iloc[0].loc[return_col]
 
         # if no home account hits, just return the first assigned hit
         else:
-            return (matches.iloc[0].loc['accY'], 
-                    matches.iloc[0].loc['id'])
+            return hits.iloc[0].loc[return_col]
 

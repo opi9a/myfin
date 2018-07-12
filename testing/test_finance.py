@@ -19,7 +19,7 @@ Then run load_new_txs() for each new_tx.csv
 
 Test that df generated is same as the target df.
 
-Change the categorisation of one item and call recategorise() or similar
+Change the categorisation of one ITEM and call recategorise() or similar
 
 """
 
@@ -32,13 +32,13 @@ accounts='accounts.pkl'
 
 def make_target_df():
     columns=[
- 'date',      'accX', 'accY', 'amt', 'item',     'id','mode']
+ 'date',      'accX', 'accY', 'amt', 'ITEM',     'id','mode']
 
     lines = [
 # first what will be the initial txdb, to which others will add, but also
 # will serve as the initial category map to look others up.
-# So want to establish an initial item->category mapping that can 
-# then also be used to test fuzzy mapping, with a slightly different item.
+# So want to establish an initial ITEM->category mapping that can 
+# then also be used to test fuzzy mapping, with a slightly different ITEM.
 ["13/01/2001",'acc1', 'cat1',  1.00, 'item1 norm',  1, -1],# initial txdb
 
 # Simple new tx, looks up cat1 mapping directly 
@@ -68,7 +68,7 @@ parser = dict(input_type = 'credit_debit',
               date_format = "%d/%m/%Y", 
               mappings = {
                   'date': 't_date',
-                  'item': 't_item',
+                  'ITEM': 't_item',
                   'debit_amt': 't_debit',
                   'credit_amt': 't_credit',
               })
@@ -98,7 +98,7 @@ def init_csvs(df):
     new_tx1_df['credit'] = new_tx1_df.loc[new_tx1_df['amt'] < 0, 'amt'] *-1
 
     # select reqd columns and rename, so they have to be renamed when importing
-    new_tx1_df = new_tx1_df[['item', 'debit', 'credit']].reset_index()
+    new_tx1_df = new_tx1_df[['ITEM', 'debit', 'credit']].reset_index()
     new_tx1_df.columns = ['t_'+x for x in new_tx1_df.columns]
 
     # save to disk
@@ -108,7 +108,7 @@ def init_csvs(df):
     new_tx2_df = df[df['accX'] == 'acc2'].copy()
 
     # select and rename columns
-    new_tx2_df = new_tx2_df[['item', 'amt']].reset_index()
+    new_tx2_df = new_tx2_df[['ITEM', 'amt']].reset_index()
     new_tx2_df.columns=[['t_date','t_item', 't_net_amt']]
 
     new_tx2_df.to_csv(new_tx2, index=False)
@@ -153,7 +153,7 @@ def test_main(return_dfs=False):
     assert acc.view().shape == (2, 6)
 
     # change the category map
-    categ_map_df = pd.read_csv(categ_map, index_col='item')
+    categ_map_df = pd.read_csv(categ_map, index_col='ITEM')
 
     # change one assignation
     categ_map_df.loc['changelly', 'category'] = 'crypto'
@@ -169,7 +169,7 @@ def test_main(return_dfs=False):
                             ufunc=True, return_df=True)
 
     print('\nrecat df\n', recat_df)
-    assert recat_df.loc[recat_df['item'] == 'changelly', 'to'].values \
+    assert recat_df.loc[recat_df['ITEM'] == 'changelly', 'to'].values \
                                                             == 'crypto'
     assert recat_df.shape == generated_df.shape
 
