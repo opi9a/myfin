@@ -72,14 +72,11 @@ def categorise(ITEMs, account, tx_db=None, cat_db=None, unknowns_db=None, fuzzy_
                 # get a subdf of the best match
                 hits = tx_db.loc[tx_db['ITEM']==best_match].set_index('ITEM')
                 res = pick_match(best_match, account, hits)
-                print('res', res)
-                print('hits', hits)
                 results.append((res, 3))
                 new_match_accX = hits.loc[best_match, 'accX']
                 new_match_id = hits.loc[best_match, 'id']
-                print('fuzzy db before', fuzzy_db)
                 fuzzy_db.loc[ITEM] = [account, best_match,
-                                      new_match_accX, res, new_match_id] 
+                                      new_match_accX, res, new_match_id, 'unconfirmed'] 
                 print(results[-1])
                 continue
 

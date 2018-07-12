@@ -97,12 +97,14 @@ def load_new_txs(new_tx_paths, tx_db_path, cat_db_path, unknowns_path, fuzzy_db_
     df_out = (new_tx_df[['date', 'accX', 'accY', 'net_amt', 'ITEM', '_item',
                          'id', 'mode']] .set_index('date'))
 
-    # from df_out modes organise and amend the dbs:
+    # 6. from df_out modes organise and amend the dbs:
         # mode -1: already unknown so nfa
         # mode  0: new unknowns, so append -> unknowns_db DONE
         # mode  1: already known, so nfa
         # mode  2: already fuzzy matched, so nfa
-        # (mode 3: new fuzzy match - already amended in categorise()*)
+        # (mode 3: new fuzzy match - already amended in categorise()*, so just
+        #          need to save to disk)
+        # plus the tx_db itself
         
 
     # first the new unknowns (mode = 0)
@@ -142,39 +144,120 @@ def load_new_txs(new_tx_paths, tx_db_path, cat_db_path, unknowns_path, fuzzy_db_
     if return_df: return df_out
 
 
-def update_unknowns(unknowns_path, account, tx_db=None, tx_db_path=None,
-                    return_df=False):
+def update_fuzzy(fuzzy_db_path, account, tx_db_path=None,
+                    unknowns_db_path=None, cat_db_path=None, return_df=False):
+    """Take a csv file of fuzzy matches for which some have status
+    set to 'confirmed', some 'rejected', some 'modified', 
+    (others left 'unconfirmed').
+
+    For those that are confirmed:
+        - add to cat_db
+        - delete from fuzzy
+
+    For those that are modified:
+        - add to cat_db
+        - edit in tx_db
+        - delete from fuzzy
+
+    For those that are rejected:
+        - add to unknown
+        - delete from fuzzy
+
+    For those that remain unconfirmed:
+        - leave in fuzzy (i.e. write only these, to disk)
+    """
+    fuzzy_db = pd.read_csv(fuzzy_db_path, index_col='ITEM')
+    cat_db = pd.read_csv(cat_db_path, index_col='_item')
+    unknowns_db = pd.read_csv(unknowns_db_path, index_col='_item')
+    tx_db = pd.read_csv(tx_db_path, index_col='_item')
+
+    confirmed = fuzzy_db.loc[fuzzy_db['status'] == 'confirmed']
+    # convert to cat_db structure, and pd.concat to cat_db
+    confirmed = confirmed.reset_index(drop=False)
+    confirmed['_item'] = confirmed['ITEM'].str.lower().str.strip()
+    confirmed = confirmed.set_index('_item')[['accX', 'match_accY']]
+    confirmed = confirmed.rename(columns={'match_accY':'accY'})
+    cat_db = pd.concat([cat_db, confirmed])
+    cat_db.to_csv(cat_db_path)
+    
+    rejected = fuzzy_db.loc[fuzzy_db['status'] == 'rejected']
+    # convert to unknown_db structure, and pd.concat to unknown_db
+    rejected = rejected.reset_index(drop=False)
+    rejected['_item'] = rejected['ITEM'].str.lower().str.strip()
+    rejected = rejected.set_index('_item')[['accX']]
+    rejected['accY'] = 'unknown'
+    unknowns_db = pd.concat([unknowns_db, rejected])
+    unknowns_db.to_csv(unknowns_db_path)
+
+    modified = fuzzy_db.loc[fuzzy_db['status'] == 'modified']
+    # convert to cat_db structure, and pd.concat to cat_db
+    modified = modified.reset_index(drop=False)
+    modified['_item'] = modified['ITEM'].str.lower().str.strip()
+    modified = modified.set_index('_item')[['accX', 'match_accY']]
+    modified = modified.rename(columns={'match_accY':'accY'})
+    cat_db = pd.concat([cat_db, modified])
+    cat_db.to_csv(cat_db_path)
+    
+    # call edit_tx to overwrite in tx_db
+    modified = fuzzy_db.loc[fuzzy_db['status'] == 'modified']
+    for tx in modified.index:
+        new_val = modified.loc[tx, 'match_accY']
+        print('new val', new_val)
+        edit_tx(tx_db, 'accY', new_val,
+                [tx_db['ITEM'] == tx,
+                 tx_db['accX'] == account])
+
+    tx_db = tx_db.reset_index()
+    tx_db = (tx_db[['date', 'accX', 'accY', 'net_amt', 'ITEM', '_item',
+                         'id', 'mode']].set_index('date'))
+
+    tx_db.to_csv(tx_db_path)
+
+    # save back only those still unconfirmed
+    fuzzy_db.loc[fuzzy_db['status'] == 'unconfirmed'].to_csv(fuzzy_db_path)
+
+
+
+def update_unknowns(unknowns_path, account, tx_db_path=None,
+                    cat_db_path=None, return_df=False):
     """Take a csv file of unknowns for which some have had accY
-    categories manually completed.
+    categories manually completed (i.e. 'accY'!='unknown').
 
-    For those that are completed, update the relevant fields in a tx_db. 
-
-    Delete from the unknowns csv
+    For those that are completed:
+        - update the relevant fields in a tx_db. 
+        - add to cat_db
+        - delete from unknowns
     """
 
-    if tx_db is None:
-        if tx_db_path is None:
-            print('need a tx_db or a path')
-            return 1
-        else:
-            tx_db = pd.read_csv(tx_db_path, index_col='date')
+    tx_db = pd.read_csv(tx_db_path, index_col='date')
 
     unknowns = pd.read_csv(unknowns_path, index_col='_item')
 
     to_edit = unknowns.loc[unknowns['accY'] != 'unknown']
 
+    if len(to_edit) == 0:
+        print('no updated unknowns to process')
+        return
+
+    cat_db = pd.read_csv(cat_db_path, index_col='_item')
+
     base_masklist = [tx_db['accX'] == account,
                      tx_db['accY'] == 'unknown']
 
     for tx in to_edit.index:
+        # first the tx_db
         masks = base_masklist + [tx_db['ITEM'].str.lower().str.strip() == tx]
         new_val = to_edit.loc[tx,'accY'] 
         edit_tx(df=tx_db, target_col='accY', new_val=new_val, masks=masks)
 
+        # now the cat_db
+        cat_db.loc[tx] = [account, new_val]
+
+    # save back only those still unknown
     unknowns.loc[unknowns['accY'] == 'unknown'].to_csv(unknowns_path)
 
-    if tx_db_path is not None:
-        tx_db.to_csv(tx_db_path)
+    tx_db.to_csv(tx_db_path)
+    cat_db.to_csv(cat_db_path)
 
     if return_df:
         return tx_db
