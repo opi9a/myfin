@@ -5,6 +5,66 @@ from finance.categorise import categorise
 from finance.load_new_txs import load_new_txs
 from finance.Account import Account 
 
+def setup_dbs():
+    # new_tx
+    tx = pd.DataFrame([
+        ['13/01/2003','not findable', 10, 'n/a'],
+        ['14/01/2003','not findable', 10, 'n/a'],
+        ['13/01/2004','absent categ', 'n/a', 99],
+        ['14/01/2004','absent categ', 'n/a', 99],
+        ['13/01/2005','item1', 'n/a', 20],
+    ],
+    columns=['t_date', 't_item', 't_credit', 't_debit'])
+    new_items = ['oldunknown1', 'known1', 'oldfuzzy1', 'new fuzzy item', 'newunknown']
+    tx['t_item'] = new_items
+    tx.to_csv('new_tx.csv', index=False)
+    
+    # knowns
+    cols = {'_item': ['known1','known1'],
+            'accX':  ['acc3','acc2'],
+            'accY':  ['cat3','cat2'],
+           }
+    knowns = pd.DataFrame(cols)
+    knowns = knowns.set_index('_item') 
+    knowns.to_csv('cat_db.csv')
+
+    # unknowns
+    cols = {'_item': ['oldunknown1','oldunknown2'],
+            'accX':  ['acc1','acc2'],
+            'accY':  ['unknown','unknown'],
+           }
+    unknowns = pd.DataFrame(cols)
+    unknowns = unknowns.set_index('_item') 
+    unknowns.to_csv('unknowns.csv')
+
+    # fuzzy
+    cols = {'ITEM': ['oldfuzzy1','oldfuzzy2', 'oldfuzzy3'],
+            'accX':  ['acc1','acc2','acc3'],
+            'match_ITEM':  ['oldfuzmatch1','oldfuzmatch2','oldfuzmatch3'],
+            'match_accX':  ['acc1','acc2','acc3'],
+            'match_accY':  ['cat1','cat2','cat3'],
+            'match_id':  [111,112,113],
+            'status':  'unconfirmed',
+           }
+    fuzzy_db = pd.DataFrame(cols)
+    fuzzy_db = fuzzy_db.set_index('ITEM')
+    fuzzy_db.to_csv('fuzzy_db.csv')
+
+    # the tx_db
+    cols = {'accX':  ['acc1','acc2'],
+            'accY':  ['cat1','cat2'],
+            'net_amt':  [10,20],
+            'ITEM': ['FUZZY item1','NOT FZ FINDABLE'],
+            '_item': ['fuzzy item1','not fz findable'],
+            'id':  [101,102],
+            'mode':  [1,1],
+           }
+    ind = pd.DatetimeIndex(start=pd.datetime(2003,1,13),
+                           periods=len(unknowns), freq='D')
+    ind.name= 'date'
+    tx_db = pd.DataFrame(cols, index=ind)
+    tx_db.to_csv('tx_db.csv', date_format="%d/%m/%Y")
+
 """
 First make a target df for the expected result after processing.
 
