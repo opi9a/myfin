@@ -1,69 +1,149 @@
 import pandas as pd
 import os
+from pprint import pprint
 
 from finance.categorise import categorise
 from finance.load_new_txs import load_new_txs
 from finance.Account import Account 
 
-def setup_dbs():
-    # new_tx
-    tx = pd.DataFrame([
-        ['13/01/2003','not findable', 10, 'n/a'],
-        ['14/01/2003','not findable', 10, 'n/a'],
-        ['13/01/2004','absent categ', 'n/a', 99],
-        ['14/01/2004','absent categ', 'n/a', 99],
-        ['13/01/2005','item1', 'n/a', 20],
-    ],
-    columns=['t_date', 't_item', 't_credit', 't_debit'])
-    new_items = ['oldunknown1', 'known1', 'oldfuzzy1', 'new fuzzy item', 'newunknown']
-    tx['t_item'] = new_items
-    tx.to_csv('new_tx.csv', index=False)
+# new, with empty option, doesnt pick up new fuzzies
+def setup_dbs(empty=False, proj_dir_reqd=True, clean_dir=True):
+    """Sets up a full complement of databases for testing, over-writing
+    any existing files by default:
+        - tx_db      : the main database
+        - new_tx     : the transactions to load
+        - cat_db     : items previously assigned to categories
+        - unknowns_db: items previously designated unknown
+        - fuzzy_db   : itemps previously assigned with a fuzzy match
+
+    Also generates a parser.pkl file to work with the new_tx.csv
+
+    Pass empty=True to get empty versions of the basic csvs:
+        tx_db, cat_db, fuzzy_db, unknowns_db
+
+    Will only work in a directory containing string 'proj', to stop
+    accidentally polluting other folders. Override this behaviour by
+    changing proj_dir_reqd flag.
+
+    Overwrites existing files by default.
+    """
+
+    if proj_dir_reqd and 'test' not in os.path.basename(os.getcwd()):
+        print('not in a proj directory')
+        return 1
+
+    if clean_dir:
+        for f in ['tx_db.csv', 'new_tx.csv', 'cat_db.csv',
+                  'unknowns.csv', 'fuzzy_db.csv', 'parser.pkl']:
+            if os.path.exists(f):
+                os.remove(f)
+
+
+    # new_tx - only make if not passing 'empty' flag
+    if not empty:
+        lines = []
+        columns=['t_date', 't_item', 't_credit', 't_debit']
+
+        lines.extend ([
+           ['13/01/2003','oldunknown1', 10, 'n/a'],
+           ['14/01/2003','known1', 10, 'n/a'],
+           ['13/01/2004','oldfuzzy1', 'n/a', 99],
+           ['14/01/2004','new fuzzy item', 'n/a', 99],
+           ['13/01/2005','newunknown', 'n/a', 20],
+        ])
+
+        tx = pd.DataFrame(data = lines, columns=columns)
+        tx.to_csv('new_tx.csv', index=False)
+
     
-    # knowns
-    cols = {'_item': ['known1','known1'],
-            'accX':  ['acc3','acc2'],
-            'accY':  ['cat3','cat2'],
-           }
-    knowns = pd.DataFrame(cols)
-    knowns = knowns.set_index('_item') 
-    knowns.to_csv('cat_db.csv')
+    # knowns - only fill if not passing 'empty' flag
+    lines = []
+    columns=['_item', 'accX', 'accY']
+    if not empty:
+        lines.extend ([
+        ['known1','acc3','cat3'],
+        ['known1','acc2','cat4'],
+        ])
+    tx = pd.DataFrame(data = lines, columns=columns)
+    tx = tx.set_index('_item')
+    tx.to_csv('cat_db.csv', index=True)
 
-    # unknowns
-    cols = {'_item': ['oldunknown1','oldunknown2'],
-            'accX':  ['acc1','acc2'],
-            'accY':  ['unknown','unknown'],
-           }
-    unknowns = pd.DataFrame(cols)
-    unknowns = unknowns.set_index('_item') 
-    unknowns.to_csv('unknowns.csv')
+    # unknowns - only fill if not passing 'empty' flag
+    lines = []
+    columns=['_item', 'accX', 'accY']
+    if not empty:
+        lines.extend ([
+        ['oldunknown1','acc1','unknown'],
+        ['oldunknown2','acc2','unknown'],
+        ])
+    tx = pd.DataFrame(data = lines, columns=columns)
+    tx = tx.set_index('_item')
+    tx.to_csv('unknowns_db.csv')
 
-    # fuzzy
-    cols = {'ITEM': ['oldfuzzy1','oldfuzzy2', 'oldfuzzy3'],
-            'accX':  ['acc1','acc2','acc3'],
-            'match_ITEM':  ['oldfuzmatch1','oldfuzmatch2','oldfuzmatch3'],
-            'match_accX':  ['acc1','acc2','acc3'],
-            'match_accY':  ['cat1','cat2','cat3'],
-            'match_id':  [111,112,113],
-            'status':  'unconfirmed',
-           }
-    fuzzy_db = pd.DataFrame(cols)
-    fuzzy_db = fuzzy_db.set_index('ITEM')
-    fuzzy_db.to_csv('fuzzy_db.csv')
 
-    # the tx_db
-    cols = {'accX':  ['acc1','acc2'],
-            'accY':  ['cat1','cat2'],
-            'net_amt':  [10,20],
-            'ITEM': ['FUZZY item1','NOT FZ FINDABLE'],
-            '_item': ['fuzzy item1','not fz findable'],
-            'id':  [101,102],
-            'mode':  [1,1],
-           }
+    # fuzzy - only fill if not passing 'empty' flag
+    lines = []
+    columns=['ITEM', 'accX', 'match_ITEM', 'match_accX',
+             'match_accY', 'match_id', 'status']
+
+    if not empty:
+        lines.extend ([
+            ['oldfuzzy1', 'acc1', 'oldfuzmatch1',
+                 'acc1', 'cat5', 111, 'unconfirmed'],
+            ['oldfuzzy2', 'acc2', 'oldfuzmatch2',
+                 'acc2', 'cat6', 112, 'unconfirmed'],
+            ['oldfuzzy3', 'acc3', 'oldfuzmatch3',
+                 'acc3', 'cat7', 113, 'unconfirmed']
+                    ])
+    tx = pd.DataFrame(data = lines, columns=columns)
+    tx = tx.set_index('ITEM')
+    tx.to_csv('fuzzy_db.csv')
+
+    # the tx_db - only fill if not passing 'empty' flag
+    lines = []
+    columns=['accX', 'accY', 'net_amt', 'ITEM', '_item', 'id', 'mode']
+
+    if not empty:
+        lines.extend ([
+            ['acc1', 'cat1', 10, 'FUZZY item1', 'fuzzy item1', 101, 1],
+            ['acc2', 'cat2', 20, 'NOT FZ FINDABLE', 'not fz findable', 102, 1]
+                      ])
     ind = pd.DatetimeIndex(start=pd.datetime(2003,1,13),
-                           periods=len(unknowns), freq='D')
+                           periods=len(lines), freq='D')
     ind.name= 'date'
-    tx_db = pd.DataFrame(cols, index=ind)
-    tx_db.to_csv('tx_db.csv', date_format="%d/%m/%Y")
+    tx = pd.DataFrame(data = lines, columns=columns, index=ind)
+    tx.to_csv('tx_db.csv', date_format="%d/%m/%Y")
+
+
+    # need a parser - only make if not passing 'empty' flag
+    if not empty:
+        parser = dict(input_type = 'credit_debit',
+                      date_format = "%d/%m/%Y", 
+                      map = {
+                          'date': 't_date',
+                          'ITEM': 't_item',
+                          'debit_amt': 't_debit',
+                          'credit_amt': 't_credit',
+                         })
+
+        pd.to_pickle(parser, 'parser.pkl')
+
+
+def print_dir(pkls=True):
+    """Reads and prints all .csv and .pkl files in a directory.
+    (pkls must be dict).
+    """
+    for f in os.listdir():
+        print("-"*50, end="\n")
+        print(f, end="\n\n")
+        if f.endswith('csv'):
+            df = pd.read_csv(f)
+            index_col = df.columns[0] 
+            print(df.set_index(index_col), end="\n\n")
+        if f.endswith('pkl'):
+            if pkls:
+                pprint(pd.read_pickle(f))
+
 
 """
 First make a target df for the expected result after processing.

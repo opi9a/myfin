@@ -18,13 +18,13 @@ def categorise(ITEMs, account, tx_db=None, cat_db=None, unknowns_db=None, fuzzy_
     # print('unknowns_db', unknowns_db, end='\n\n')
     # print('cat_db', cat_db, end='\n\n')
     # print('tx_db', tx_db, end='\n\n')
-    print('fuzzy_db', fuzzy_db, end='\n\n')
+    # print('fuzzy_db', fuzzy_db, end='\n\n')
 
 
     # get results - a list of tuples
     results = []
     for ITEM in ITEMs:
-        print("\nnow with item:", ITEM)
+        # print("\nnow with item:", ITEM)
 
         _item = ITEM.lower().strip()
 
@@ -40,34 +40,35 @@ def categorise(ITEMs, account, tx_db=None, cat_db=None, unknowns_db=None, fuzzy_
         # based on the modes assigned to the new_txs
 
         # 1. check in unknowns_db   -> append ('unknown', -1) <old unknown>
-        if unknowns_db.index.contains(_item):
-            print('unknown\n')
+        if (unknowns_db is not None and len(unknowns_db) > 0
+                                   and unknowns_db.index.contains(_item)):
+            # print('unknown\n')
             results.append(('unknown', -1))
-            print(results[-1])
+            # print(results[-1])
             continue
 
         # 2. check in cat_db        -> append (<hit>,      1) <known>
-        if cat_db.index.contains(_item):
-            print('a known hit')
+        if cat_db is not None and cat_db.index.contains(_item):
+            # print('a known hit')
             hits = cat_db.loc[[_item]]
             results.append((pick_match(_item, account, hits), 1))
-            print(results[-1])
+            # print(results[-1])
             continue
 
         # 3. check in fuzzy_db      -> append (<hit>,      2) <old fuzzy>
-        if fuzzy_db.index.contains(ITEM):
-            print('a fuzzy hit')
+        if fuzzy_db is not None and fuzzy_db.index.contains(ITEM):
+            # print('a fuzzy hit')
             hits = fuzzy_db.loc[[ITEM]]
             results.append((pick_match(_item, account, hits, return_col='match_accY'), 2))
-            print(results[-1])
+            # print(results[-1])
             continue
 
         # 4. fuzzy match on tx_db   -> append (<hit>,      3) <new fuzzy>
-        if fuzzymatch:
-            print('trying a fuzzy match')
+        if fuzzymatch and len(tx_db>0):
+            # print('trying a fuzzy match')
             best_match, score = process.extractOne(ITEM, tx_db['ITEM'].values,
                                                    scorer=fuzz.token_set_ratio)
-            print(best_match, score)
+            # print(best_match, score)
             if score >= fuzzy_threshold:
                 # get a subdf of the best match
                 hits = tx_db.loc[tx_db['ITEM']==best_match].set_index('ITEM')
@@ -77,7 +78,7 @@ def categorise(ITEMs, account, tx_db=None, cat_db=None, unknowns_db=None, fuzzy_
                 new_match_id = hits.loc[best_match, 'id']
                 fuzzy_db.loc[ITEM] = [account, best_match,
                                       new_match_accX, res, new_match_id, 'unconfirmed'] 
-                print(results[-1])
+                # print(results[-1])
                 continue
 
         # 5. just assign 'unknown'  -> append ('unknown',  0) <new unknown>
