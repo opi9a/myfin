@@ -1,40 +1,172 @@
 import pandas as pd
 import numpy as np
 import os
-
-np.
-
-from finance.categorise import categorise
-from finance.general import consol_debit_credit
+from fuzzywuzzy import fuzz, process
 
 
-def load_new_txs(new_tx_paths, account_name, parser, 
-                 tx_db_path='tx_db.csv', cat_db_path='cat_db.csv', 
-                 unknowns_path='unknowns_db.csv', fuzzy_db_path='fuzzy_db.csv',
-                 fuzzymatch=True, return_txdb=False):
+"""Library of functions and a main function for loading transactions
+from csv files:
 
-    """Import raw transactions and return a tx_df in standard format,
-    with date index, and columns: from, to, amt
+    1. parse the csv, using a parser dict, to give a df with standard
+       columns with <parse_new_txs()>
 
-    new_tx_pkaths : a list of csv files with new transactions
-    
-    tx_db_path:     the path of the existing tx database. 
-                   (or a new one to create)
+    2. assign target accounts to the items in the new tx df
+       with <assign_targets()>:
+        - checks against dbs if already:
+            - known, in <cat_db>
+            - unknown, in <unknowns_db>
+            - fuzzy matched, in <fuzzy_db>
+        - otherwise looks for a new fuzzy match
+        - otherwise assigns as a new unknown
+        - (function also returns the 'mode', a description of how 
+           assignment was made)
+
+    3. append any new fuzzy matches or unknowns to the corresponding db
+
+    4. append new txs to tx_db
+
+"""
+
+def main(new_tx_paths, account_name, parser,
+         tx_db_path    = 'tx_db.csv',
+         cat_db_path   = '../persistent_cat_db.csv', 
+         unknowns_path = 'unknowns_db.csv',
+         fuzzy_db_path = 'fuzzy_db.csv', fuzzymatch=True):
+    """Loads new transactions from input csvs in tx_db_path.
+
+    Assigns categories by checking againts dbs for knowns,
+    unknowns and previous fuzzy matches - or by carrying out
+    a new fuzzy match.
+
+    Updates dbs, including the main tx_db
+    """
+
+    # load db files to RAM
+    tx_db       = pd.read_csv(tx_db_path,    index_col='date')
+    cat_db      = pd.read_csv(cat_db_path,   index_col='_item')
+    unknowns_db = pd.read_csv(unknowns_path, index_col='_item')
+    fuzzy_db    = pd.read_csv(fuzzy_db_path, index_col='_item')
+
+    # parse the new transactions
+    new_txs = parse_new_txs(new_tx_paths, account_name, parser)
+
+    # add categories and modes (source of categorisation)
+    assignments = assign_targets(new_txs['_item'], account_name,
+                                 cat_db, unknowns_db, fuzzy_db)
+
+    new_txs = new_txs.join(pd.DataFrame(assignments, columns=['accY', 'mode']))
+
+    # append the new unknowns to unknowns_db
+    new_unknowns = new_txs.loc[new_txs['mode'] == 'new unknown',
+                               ['_item', 'accY']]
+    new_unknowns['accX'] = account_name
+
+    unknowns_db = unknowns_db.append(new_unknowns[['_item', 'accX', 'accY']]
+                               .set_index('_item', drop=True))
+    unknowns_db.to_csv(unknowns_path)
+
+
+    # append the new fuzzy matches to fuzzy_db
+    new_fuzzies = new_txs.loc[new_txs['mode'] == 'new fuzzy', ['_item', 'accY']]
+    new_fuzzies['status'] = 'unconfirmed'
+    new_fuzzies['accX'] = account_name
+
+    fuzzy_db = fuzzy_db.append(new_fuzzies[['_item', 'accX', 'accY', 'status']]
+                               .set_index('_item', drop=True))
+    fuzzy_db.to_csv(fuzzy_db_path)
+
+    # finally append the new txs to the tx_db (with unique IDs)
+    if len(tx_db>0):
+        max_current = int(tx_db['id'].max())
+    else: max_current = 100
+
+    new_txs['id'] = np.arange(max_current + 1,
+                              max_current + 1 + len(new_txs)).astype(int)
+
+    new_txs['accX'] = account_name
+
+    new_txs = (new_txs[['date', 'accX', 'accY', 'net_amt', 'ITEM', '_item',
+                        'id', 'mode']].set_index('date'))
+
+    tx_db = tx_db.append(new_txs)
+    tx_db.to_csv(tx_db_path)
+
+
+#------------------------------------------------------------------------------
+
+def make_parser(input_type = 'debit_credit',
+                  date_format = '%d/%m/%Y',
+                  debit_sign = 'positive',
+                  date = 'date',
+                  ITEM = 'ITEM',
+                  net_amt = 'net_amt',
+                  credit_amt = 'credit_amt',
+                  debit_amt = 'debit_amt'):
+    """Generate a parser dict for controlling import of new txs from csv.
+
+    input_type      : 'debit_credit' or 'net_amt'
+    date_format     : strftime structure, eg see default
+    debit_sign      : if net_amt, are debits shown as 'positive' or 'negative'
+
+    the rest are column name mappings - that is, the names in the input csv
+    for the columns corresponding to 'date' 'ITEM', 'net_amt' etc
+
+    Will automatically remove mappings that are not reqd, eg will remove 'net_amt'
+    if the input type is 'debit_credit'.
+    """
+
+    parser = dict(input_type = input_type,
+                  date_format = date_format,
+                  debit_sign = debit_sign,
+                  map = dict(date = date,
+                             ITEM = ITEM,
+                             net_amt = net_amt,
+                             credit_amt = credit_amt,
+                             debit_amt = debit_amt,
+                            )
+                 )
+
+    if input_type == 'debit_credit':
+        del parser['map']['net_amt']
+
+    if input_type == 'net_amt':
+        del parser['map']['credit_amt']
+        del parser['map']['debit_amt']
+
+    return parser
+
+
+#------------------------------------------------------------------------------
+
+def parse_new_txs(new_tx_paths, account_name, parser):
+
+    """Import raw transactions from csv and return a tx_df in standard format,
+    with date index, and columns: accX(from), accY(to), net_amt
+
+    new_tx_paths : a list of csv files with new transactions
+                    - will also accept a single file path
 
     account_name : name of the account, for assignation in the 'from' and
                    'to' columns
 
-    parser       : dict with instructions for processing the raw tx raw_tx_path
+    parser       : dict with instructions for processing the raw tx file
+
                     - 'input_type' : 'credit_debit' or 'net_amt'
+
                     - 'date_format': eg "%d/%m/%Y"
+
                     - 'map'        : dict of map for column labels
                                      (new labels are keys, old are values)
+
                     - 'debit_sign' : are debits shown as negative
-                                     or positive numbers (for net_amt inputs)?
+                                     or positive numbers? (for net_amt inputs)
+                                     - default is 'positive'
 
                  - mapping must cover following columns (i.e. new labels):
-                   - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
-                   - credit_debit: 'debit_amt', 'credit_amt' replace 'net_amt'
+
+                       - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
+
+                       - credit_debit: 'debit_amt', 'credit_amt' replace 'net_amt'
 
 
     """
@@ -63,281 +195,85 @@ def load_new_txs(new_tx_paths, account_name, parser,
         new_tx_df['net_amt'] = (new_tx_df['debit_amt']
                              .subtract(new_tx_df['credit_amt'], fill_value=0))
 
-    if parser['debit_sign'] == 'negative':
+    if parser.get('debit_sign', 'positive') == 'positive':
         new_tx_df['net_amt'] *= -1
         
-
-    # 3. load db files to RAM
-    if tx_db_path is not None and os.path.isfile(tx_db_path):
-        tx_db = pd.read_csv(tx_db_path, index_col='date')
-    else: tx_db = None
-
-    if os.path.isfile(cat_db_path):
-        cat_db = pd.read_csv(cat_db_path, index_col='_item')
-    else: cat_db = None
-  
-    if os.path.isfile(unknowns_path):
-        unknowns_db = pd.read_csv(unknowns_path, index_col='_item')
-    else: unknowns_db = None
-  
-    if os.path.isfile(fuzzy_db_path):
-        fuzzy_db = pd.read_csv(fuzzy_db_path, index_col='ITEM')
-    else: fuzzy_db = None
+    return new_tx_df[['date', 'ITEM', '_item', 'net_amt']]
 
 
-    # return dict(new_tx_df=new_tx_df, tx_db=tx_db, cat_db=cat_db,
-    #             fuzzy_db=fuzzy_db, unknowns_db=unknowns_db)
-
-    # 4. call categorise() to get accY and mode columns,
-    categ_out = categorise(new_tx_df['ITEM'], account=account_name,
-                           tx_db=tx_db,
-                           cat_db=cat_db,
-                           fuzzy_db=fuzzy_db,
-                           fuzzymatch=fuzzymatch,
-                           unknowns_db=unknowns_db)
-
-    new_tx_df['accY'] = [x[0] for x in categ_out]
-    new_tx_df['mode'] = [x[1] for x in categ_out]
 
 
-    # 5. add id and account name columns to make output df
-    if tx_db is not None and len(tx_db>0):
-        max_current = int(tx_db['id'].max())
-    else: max_current = 100
-
-    new_tx_df['id'] = np.arange(max_current + 1,
-                                max_current + 1 + len(new_tx_df)).astype(int)
-
-    new_tx_df['accX'] = account_name
-
-    df_out = (new_tx_df[['date', 'accX', 'accY', 'net_amt', 'ITEM', '_item',
-                         'id', 'mode']] .set_index('date'))
-
-    # 6. update the dbs. Helps to think of actions by mode.
-        # mode -1: already unknown so nfa
-        # mode  0: new unknowns, so append -> unknowns_db DONE
-        # mode  1: already known, so nfa
-        # mode  2: already fuzzy matched, so nfa
-        # (mode 3: new fuzzy match - already amended in categorise()*, so just
-        #          need to save to disk)
-        # plus the tx_db itself of course
-
-    # first the new unknowns (mode = 0)
-    if unknowns_db is not None:
-        new_unknowns =  df_out.loc[df_out['mode']==0]
-        new_unknowns = new_unknowns[['_item', 'accX','accY']].reset_index(drop=True)
-        unknowns_db = unknowns_db.reset_index(drop=False)
-
-        unknowns_out = pd.concat([unknowns_db, new_unknowns], sort=True).drop_duplicates() 
-        unknowns_out.to_csv(unknowns_path, index=False)
-
-    # now the new fuzzy matches - already added to db in RAM
-    if fuzzy_db is not None:
-        fuzzy_db.to_csv(fuzzy_db_path, date_format="%d/%m/%Y")
-
-    # *problem is that the fields required to fill in the fuzzy_db are not
-    # available.  Need eg the best match result that led to the fuzzy find.
-    # That stuff is hidden in categorise()
-    # Possible solutions:
-        # - have categorise return mode values that allow the match to be looked up
-        #   (it is from tx_db, so just need the id).  Started trying this below but
-        #   it's not easy (maybe impossible) to overwrite the column in df_out with 
-        #   a series of looked-up ITEMs from tx_db (got with the series of ids).
-        #   So this is commented out below.
-
-        # - do the modification of fuzzy_db in the categorise() loop.  That is, 
-        #   as soon as a match is found, append it to tx_db.  If going to do this, 
-        #   which does seem best, maybe better to do all the db appends in the 
-        #   categorise loop. NOW DOING THIS
-
-
-    # finally the tx_db
-    if tx_db_path is not None and os.path.isfile(tx_db_path):
-        df_out.to_csv(tx_db_path, mode="a", header=False, date_format="%d/%m/%Y")
-    else:
-        if tx_db_path is not None:
-            df_out.to_csv(tx_db_path, mode="w", header=True,
-                          date_format="%d/%m/%Y")
-
-
-    if return_txdb: return df_out
-
-
-def update_fuzzy(account, fuzzy_db_path='fuzzy_db.csv', tx_db_path='tx_db.csv',
-                 unknowns_db_path='unknowns_db.csv', cat_db_path='cat_db.csv',
-                 return_txdb=False):
-    """Take a csv file of fuzzy matches for which some have status
-    set to 'confirmed', some 'rejected', some 'modified', 
-    (others left 'unconfirmed').
-
-    For those that are confirmed:
-        - add to cat_db
-        - delete from fuzzy
-
-    For those that are modified:
-        - add to cat_db
-        - edit in tx_db
-        - delete from fuzzy
-
-    For those that are rejected:
-        - add to unknown
-        - delete from fuzzy
-
-    For those that remain unconfirmed:
-        - leave in fuzzy (i.e. write only these, to disk)
-    """
-    fuzzy_db = pd.read_csv(fuzzy_db_path, index_col='ITEM')
-    cat_db = pd.read_csv(cat_db_path, index_col='_item')
-    unknowns_db = pd.read_csv(unknowns_db_path, index_col='_item')
-    tx_db = pd.read_csv(tx_db_path, index_col='_item')
-
-    confirmed = fuzzy_db.loc[fuzzy_db['status'] == 'confirmed']
-    # convert to cat_db structure, and pd.concat to cat_db
-    confirmed = confirmed.reset_index(drop=False)
-    confirmed['_item'] = confirmed['ITEM'].str.lower().str.strip()
-    confirmed = confirmed.set_index('_item')[['accX', 'match_accY']]
-    confirmed = confirmed.rename(columns={'match_accY':'accY'})
-    cat_db = pd.concat([cat_db, confirmed])
-    cat_db.to_csv(cat_db_path)
-    
-    rejected = fuzzy_db.loc[fuzzy_db['status'] == 'rejected']
-    # convert to unknown_db structure, and pd.concat to unknown_db
-    rejected = rejected.reset_index(drop=False)
-    rejected['_item'] = rejected['ITEM'].str.lower().str.strip()
-    rejected = rejected.set_index('_item')[['accX']]
-    rejected['accY'] = 'unknown'
-    unknowns_db = pd.concat([unknowns_db, rejected])
-    unknowns_db.to_csv(unknowns_db_path)
-
-    modified = fuzzy_db.loc[fuzzy_db['status'] == 'modified']
-    # convert to cat_db structure, and pd.concat to cat_db
-    modified = modified.reset_index(drop=False)
-    modified['_item'] = modified['ITEM'].str.lower().str.strip()
-    modified = modified.set_index('_item')[['accX', 'match_accY']]
-    modified = modified.rename(columns={'match_accY':'accY'})
-    cat_db = pd.concat([cat_db, modified])
-    cat_db.to_csv(cat_db_path)
-    
-    # call edit_tx to overwrite in tx_db
-    modified = fuzzy_db.loc[fuzzy_db['status'] == 'modified']
-    for tx in modified.index:
-        new_val = modified.loc[tx, 'match_accY']
-        edit_tx(tx_db, 'accY', new_val,
-                [tx_db['ITEM'] == tx,
-                 tx_db['accX'] == account])
-
-    tx_db = tx_db.reset_index()
-    tx_db = (tx_db[['date', 'accX', 'accY', 'net_amt', 'ITEM', '_item',
-                         'id', 'mode']].set_index('date'))
-
-    tx_db.to_csv(tx_db_path)
-
-    # save back only those still unconfirmed
-    fuzzy_db.loc[fuzzy_db['status'] == 'unconfirmed'].to_csv(fuzzy_db_path)
-
-    if return_txdb:
-        return tx_db
+#------------------------------------------------------------------------------
     
 
+def assign_targets(_items, account,
+                   cat_db=None, unknowns_db=None, fuzzy_db=None,
+                   fuzzymatch=True, fuzzy_threshold=75):
+    """
+    - take iterable of items - eg column of new_tx df
+    - iterate over items (df.apply is not faster), generating matches
+      (and the 'mode' of the match) vs ref dbs (loaded in RAM)
+    - returns list of tuples: (hit target, mode of assignment)
 
-
-def update_unknowns(account, unknowns_path='unknowns_db.csv',
-                    cat_db_path='cat_db.csv', tx_db_path='tx_db.csv',
-                    return_txdb=False):
-
-    """Take a csv file of unknowns for which some have had accY
-    categories manually completed (i.e. 'accY'!='unknown').
-
-    For those that are completed:
-        - update the relevant fields in a tx_db. 
-        - add to cat_db
-        - delete from unknowns
     """
 
-    tx_db = pd.read_csv(tx_db_path, index_col='date')
-
-    unknowns = pd.read_csv(unknowns_path, index_col='_item')
-
-    if account not in unknowns['accX'].values:
-        print("WARNING: that account name has not been found in unknowns_db")
-
-    to_edit = unknowns.loc[unknowns['accY'] != 'unknown']
-
-    if len(to_edit) == 0:
-        print('no updated unknowns to process')
-        return
-
-    cat_db = pd.read_csv(cat_db_path, index_col='_item')
-
-    base_masklist = [tx_db['accX'] == account,
-                     tx_db['accY'] == 'unknown']
-
-    for tx in to_edit.index:
-        # first the tx_db
-        masks = base_masklist + [tx_db['ITEM'].str.lower().str.strip() == tx]
-        new_val = to_edit.loc[tx,'accY'] 
-        edit_tx(df=tx_db, target_col='accY', new_val=new_val, masks=masks)
-
-        # now the cat_db
-        cat_db.loc[tx] = [account, new_val]
-
-    # save back only those still unknown
-    unknowns.loc[unknowns['accY'] == 'unknown'].to_csv(unknowns_path)
-
-    tx_db.to_csv(tx_db_path)
-    cat_db.to_csv(cat_db_path)
-
-    update_persistent_cat_db()
-
-    if return_txdb:
-        return tx_db
+    results = []
+    for _item in _items:
 
 
-def edit_tx(df, target_col, new_val, masks, return_txdb=False):
-    """Edits transactions of an input df by selection based on columns
+        #    TEST                     -> TUPLE TO APPEND TO RESULTS
+        # 1. is in unknowns_db?       -> ('unknown', 'old unknown')
+        # 2. is in cat_db?            -> (<the hit>, 'known'      )
+        # 3. is in fuzzy_db?          -> (<the hit>, 'old fuzzy'  )
+        # 4. fuzzy match in tx_db?    -> (<the hit>, 'new fuzzy'  )
+        # 5. ..else assign 'unknown'  -> ('unknown', 'new unknown')
 
-    target_col  : the column to be edited
+        if (unknowns_db is not None and len(unknowns_db) > 0
+                                   and unknowns_db.index.contains(_item)):
+            results.append(('unknown', 'old unknown'))
+            continue
 
-    new_val     : the value to be inserted at selected fields
+        if cat_db is not None and cat_db.index.contains(_item):
+            hits = cat_db.loc[[_item]]
+            results.append((pick_match(_item, account, hits), 'known'))
+            continue
 
-    masks       : a list of boolean df masks to apply to select rows
+        if fuzzy_db is not None and fuzzy_db.index.contains(_item):
+            hits = fuzzy_db.loc[[_item]]
+            results.append((pick_match(_item, account, hits), 'old fuzzy'))
+            continue
 
-                - eg [df['ITEM'].str.lower().strip() == 'newt cuffs',
-                      df['accY'] == 'groceries',
-                      df['amt'] >= 100,
-                      df['id'] < 999,
-                      df['mode'] == -1,
-                      ]
+        if fuzzymatch and cat_db is not None:
+            best_match, score = process.extractOne(_item, cat_db.index.values,
+                                                   scorer=fuzz.token_set_ratio)
+            if score >= fuzzy_threshold:
+                hits = cat_db.loc[[best_match]]
+                results.append((pick_match(best_match, account, hits), 'new fuzzy'))
+                continue
 
-    The passed list of masks is aggregated with successively overlays,
-    to give a cumulative mask applied to the df to select rows for editing.
+        results.append(('unknown', 'new unknown'))
+
+    return results
+
+
+
+def pick_match(item, account, hits, return_col='accY'):
+    """Returns match for item in sub_df of hits, giving preference for hits
+    in home account
     """
+    # if only one match, return it
+    if len(hits) == 1:
+        return hits.loc[item,return_col]
+    
+    # if more than one, look for a hit in home account
+    if len(hits) > 1:
+        home_acc_hits = hits[hits['accX']==account]
 
-    mask = True
-        
-    for m in masks:
-        mask = mask & m
+        # if any home hits, return the first - works even if multiple
+        if len(home_acc_hits) > 0:
+            return home_acc_hits.iloc[0].loc[return_col]
 
-    # finally overwrite the selection
-    df.loc[mask, target_col] = new_val
+        # if no home account hits, just return the first assigned hit
+        else:
+            return hits.iloc[0].loc[return_col]
 
-    if return_txdb: return df
-
-
-def update_persistent_cat_db(cat_db_path='cat_db.csv',
-                            persistent_cat_db_path='../persistent_cat_db.csv',
-                            return_updated_db=False):
-
-    if os.path.exists(persistent_cat_db_path):
-        persist_db = pd.read_csv(persistent_cat_db_path)
-    else:
-        print("Cannot find db at\n" + os.path.abspath(persistent_cat_db_path))
-        return 1
-
-    cat_db = pd.read_csv(cat_db_path)
-
-    updated = pd.concat([persist_db, cat_db]).drop_duplicates()
-    updated.to_csv(persistent_cat_db_path, index=False)
-
-    if return_updated_db:
-        return updated_db

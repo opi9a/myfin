@@ -2,9 +2,9 @@ import pandas as pd
 import os
 from pprint import pprint
 
-from finance.categorise import categorise
-from finance.load_new_txs import load_new_txs
+from finance.load_new_txs import parse_new_txs
 from finance.Account import Account 
+
 
 # new, with empty option, doesnt pick up new fuzzies
 def setup_dbs(empty=False, proj_dir_reqd=True, clean_dir=True):
@@ -33,10 +33,9 @@ def setup_dbs(empty=False, proj_dir_reqd=True, clean_dir=True):
         return 1
 
     if clean_dir:
-        for f in ['tx_db.csv', 'new_tx.csv', 'cat_db.csv',
-                  'unknowns.csv', 'fuzzy_db.csv', 'parser.pkl']:
-            if os.path.exists(f):
-                os.remove(f)
+        for f in os.listdir():
+            print('removing', f)
+            os.remove(f)
 
 
     # new_tx - only make if not passing 'empty' flag
@@ -45,9 +44,9 @@ def setup_dbs(empty=False, proj_dir_reqd=True, clean_dir=True):
         columns=['t_date', 't_item', 't_credit', 't_debit']
 
         lines.extend ([
-           ['13/01/2003','oldunknown1', 10, 'n/a'],
-           ['14/01/2003','known1', 10, 'n/a'],
-           ['13/01/2004','oldfuzzy1', 'n/a', 99],
+           ['13/01/2003','oldunknown', 10, 'n/a'],
+           ['14/01/2003','known', 10, 'n/a'],
+           ['13/01/2004','oldfuzzy', 'n/a', 99],
            ['14/01/2004','new fuzzy item', 'n/a', 99],
            ['13/01/2005','newunknown', 'n/a', 20],
         ])
@@ -56,58 +55,51 @@ def setup_dbs(empty=False, proj_dir_reqd=True, clean_dir=True):
         tx.to_csv('new_tx.csv', index=False)
 
     
+    # use these columns as base for all ref dbs
+    db_columns=['_item', 'accX', 'accY']
+
     # knowns - only fill if not passing 'empty' flag
     lines = []
-    columns=['_item', 'accX', 'accY']
     if not empty:
         lines.extend ([
-        ['known1','acc3','cat3'],
-        ['known1','acc2','cat4'],
+        ['known','acc3','cat3'],
+        ['known','acc2','cat4'],
+        ['new fuzzy to find','acc2','cat5'],
         ])
-    tx = pd.DataFrame(data = lines, columns=columns)
+    tx = pd.DataFrame(data = lines, columns=db_columns)
     tx = tx.set_index('_item')
     tx.to_csv('cat_db.csv', index=True)
 
     # unknowns - only fill if not passing 'empty' flag
     lines = []
-    columns=['_item', 'accX', 'accY']
     if not empty:
         lines.extend ([
-        ['oldunknown1','acc1','unknown'],
-        ['oldunknown2','acc2','unknown'],
+        ['oldunknown','acc2','unknown'],
+        ['oldunknown','acc2','unknown'],
         ])
-    tx = pd.DataFrame(data = lines, columns=columns)
+    tx = pd.DataFrame(data = lines, columns=db_columns)
     tx = tx.set_index('_item')
     tx.to_csv('unknowns_db.csv')
 
 
     # fuzzy - only fill if not passing 'empty' flag
     lines = []
-    columns=['ITEM', 'accX', 'match_ITEM', 'match_accX',
-             'match_accY', 'match_id', 'status']
 
     if not empty:
         lines.extend ([
-            ['oldfuzzy1', 'acc1', 'oldfuzmatch1',
-                 'acc1', 'cat5', 111, 'unconfirmed'],
-            ['oldfuzzy2', 'acc2', 'oldfuzmatch2',
-                 'acc2', 'cat6', 112, 'unconfirmed'],
-            ['oldfuzzy3', 'acc3', 'oldfuzmatch3',
-                 'acc3', 'cat7', 113, 'unconfirmed']
+            ['oldfuzzy', 'acc1', 'cat5', 'unconfirmed'],
+            ['oldfuzzy2', 'acc2', 'cat6', 'unconfirmed'],
+            ['oldfuzzy3', 'acc3', 'cat7', 'unconfirmed']
                     ])
-    tx = pd.DataFrame(data = lines, columns=columns)
-    tx = tx.set_index('ITEM')
+    fuzzy_cols = db_columns + ['status']
+    tx = pd.DataFrame(data = lines, columns=fuzzy_cols)
+    tx = tx.set_index('_item')
     tx.to_csv('fuzzy_db.csv')
 
-    # the tx_db - only fill if not passing 'empty' flag
+    # the tx_db - always empty
     lines = []
     columns=['accX', 'accY', 'net_amt', 'ITEM', '_item', 'id', 'mode']
 
-    if not empty:
-        lines.extend ([
-            ['acc1', 'cat1', 10, 'FUZZY item1', 'fuzzy item1', 101, 1],
-            ['acc2', 'cat2', 20, 'NOT FZ FINDABLE', 'not fz findable', 102, 1]
-                      ])
     ind = pd.DatetimeIndex(start=pd.datetime(2003,1,13),
                            periods=len(lines), freq='D')
     ind.name= 'date'
@@ -270,7 +262,7 @@ def test_main(return_dfs=False):
     assert pd.read_csv(new_tx2).shape == (3,3)
 
     # run the function to import the transactions
-    load_output = load_new_txs(raw_tx_path=new_tx1,
+    load_output = parse_new_txs(raw_tx_path=new_tx1,
                               txdb_file=txdb,
                               account_name='acc1',
                               parser=parser)
