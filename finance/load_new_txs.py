@@ -7,10 +7,14 @@ from fuzzywuzzy import fuzz, process
 """Library of functions and a main function for loading transactions
 from csv files:
 
-    1. parse the csv, using a parser dict, to give a df with standard
-       columns with <parse_new_txs()>
+    0. Look for new tx files in relevant folder - exit if not TODO
+    1. If there is a prep.py, execute it TODO
+    2. Load csvs and concat, using pd functions (keep in RAM) TODO
+    3. Check balance continuum
+    3. Format and structure the csv, using a parser dict, to give a df with standard
+       columns with <format_new_txs()>
 
-    2. assign target accounts to the items in the new tx df
+    4. assign target accounts to the items in the new tx df
        with <assign_targets()>:
         - checks against dbs if already:
             - known, in <cat_db>
@@ -21,9 +25,9 @@ from csv files:
         - (function also returns the 'mode', a description of how 
            assignment was made)
 
-    3. append any new fuzzy matches or unknowns to the corresponding db
+    5. append any new fuzzy matches or unknowns to the corresponding db
 
-    4. append new txs to tx_db
+    6. append new txs to tx_db
 
 """
 
@@ -94,14 +98,16 @@ def main(new_tx_paths, account_name, parser,
 
 #------------------------------------------------------------------------------
 
-def make_parser(input_type = 'debit_credit',
+def make_parser(input_type = 'credit_debit',
                   date_format = '%d/%m/%Y',
                   debit_sign = 'positive',
                   date = 'date',
                   ITEM = 'ITEM',
                   net_amt = 'net_amt',
                   credit_amt = 'credit_amt',
-                  debit_amt = 'debit_amt'):
+                  debit_amt = 'debit_amt',
+                  balance = None,
+               ):
     """Generate a parser dict for controlling import of new txs from csv.
 
     input_type      : 'debit_credit' or 'net_amt'
@@ -126,18 +132,174 @@ def make_parser(input_type = 'debit_credit',
                             )
                  )
 
-    if input_type == 'debit_credit':
+    if input_type == 'credit_debit':
         del parser['map']['net_amt']
 
     if input_type == 'net_amt':
         del parser['map']['credit_amt']
         del parser['map']['debit_amt']
 
+    if balance is not None:
+        parser['map']['balance'] = balance
+
     return parser
 
 
 #------------------------------------------------------------------------------
 
+def format_new_txs(new_tx_df, account_name, parser):
+
+    """Return a tx_df in standard format, with date index,
+    and columns: 'date', 'ITEM', '_item', 'net_amt' 
+
+    new_tx_df    : a df with transactions data
+
+    account_name : name of the account, for assignation in the 'from' and
+                   'to' columns
+
+    parser       : dict with instructions for processing the raw tx file
+
+                    - 'input_type' : 'credit_debit' or 'net_amt'
+
+                    - 'date_format': eg "%d/%m/%Y"
+
+                    - 'map'        : dict of map for column labels
+                                     (new labels are keys, old are values)
+
+                    - 'debit_sign' : are debits shown as negative
+                                     or positive numbers? (for net_amt inputs)
+                                     - default is 'positive'
+
+                 - mapping must cover following columns (i.e. new labels):
+
+                       - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
+
+                       - credit_debit: 'debit_amt', 'credit_amt'
+                         replace 'net_amt'
+
+                 - may optionally provide a mapping for 'balance'
+
+    """
+
+    # organise columns using parser, and add '_item' column
+    df = new_tx_df[list(parser['map'].values())]
+    df.columns = parser['map'].keys()
+    df['date'] = pd.to_datetime(df['date']) 
+    df['_item'] = df['ITEM'].str.lower().str.strip() 
+
+    # for credit_debits, make a 'net_amt' column
+    if parser['input_type'] == 'credit_debit':
+        df['debit_amt'] = pd.to_numeric(df['debit_amt'], errors='coerce')
+        df['credit_amt'] = pd.to_numeric(df['credit_amt'], errors='coerce')
+
+        df['net_amt'] = (df['debit_amt']
+                             .subtract(df['credit_amt'], fill_value=0))
+
+    if parser.get('debit_sign', 'positive') == 'positive':
+        df['net_amt'] *= -1
+        
+    cols = ['date', 'ITEM', '_item', 'net_amt']
+
+    if 'balance' in parser['map']:
+        cols.append('balance')
+
+    return df[cols]
+
+
+#------------------------------------------------------------------------------
+
+def balance_continuum(df):
+    """Returns an array with zeroes where balances are consistent with
+    net_amounts.
+
+    If balances are consistent, then:
+        bal[n]  = bal[n-1] + net_amt[n]
+        0 = bal[n] - (bal[n-1] + net_amt[n])
+    """
+    return (df.balance[1:].values 
+            - (df.net_amt[1:].values
+              + df.balance[:-1].values))
+
+
+
+#------------------------------------------------------------------------------
+    
+
+def assign_targets(_items, account,
+                   cat_db=None, unknowns_db=None, fuzzy_db=None,
+                   fuzzymatch=True, fuzzy_threshold=75):
+    """
+    - take iterable of items - eg column of new_tx df
+    - iterate over items (df.apply is not faster), generating matches
+      (and the 'mode' of the match) vs ref dbs (loaded in RAM)
+    - returns list of tuples: (hit target, mode of assignment)
+
+    """
+
+    results = []
+    for _item in _items:
+
+
+        #    TEST                     -> TUPLE TO APPEND TO RESULTS
+        # 1. is in unknowns_db?       -> ('unknown', 'old unknown')
+        # 2. is in cat_db?            -> (<the hit>, 'known'      )
+        # 3. is in fuzzy_db?          -> (<the hit>, 'old fuzzy'  )
+        # 4. fuzzy match in tx_db?    -> (<the hit>, 'new fuzzy'  )
+        # 5. ..else assign 'unknown'  -> ('unknown', 'new unknown')
+
+        if (unknowns_db is not None
+              and len(unknowns_db) > 0
+              and unknowns_db.index.contains(_item)):
+
+            results.append(('unknown', 'old unknown'))
+            continue
+
+        if cat_db is not None and cat_db.index.contains(_item):
+            hits = cat_db.loc[[_item]]
+            results.append((pick_match(_item, account, hits), 'known'))
+            continue
+
+        if fuzzy_db is not None and fuzzy_db.index.contains(_item):
+            hits = fuzzy_db.loc[[_item]]
+            results.append((pick_match(_item, account, hits), 'old fuzzy'))
+            continue
+
+        if fuzzymatch and cat_db is not None:
+            best_match, score = process.extractOne(_item, cat_db.index.values,
+                                                   scorer=fuzz.token_set_ratio)
+            if score >= fuzzy_threshold:
+                hits = cat_db.loc[[best_match]]
+                results.append((pick_match(best_match, account, hits), 'new fuzzy'))
+                continue
+
+        results.append(('unknown', 'new unknown'))
+
+    return results
+
+
+
+def pick_match(item, account, hits, return_col='accY'):
+    """Returns match for item in sub_df of hits, giving preference for hits
+    in home account
+    """
+    # if only one match, return it
+    if len(hits) == 1:
+        return hits.loc[item,return_col]
+    
+    # if more than one, look for a hit in home account
+    if len(hits) > 1:
+        home_acc_hits = hits[hits['accX']==account]
+
+        # if any home hits, return the first - works even if multiple
+        if len(home_acc_hits) > 0:
+            return home_acc_hits.iloc[0].loc[return_col]
+
+        # if no home account hits, just return the first assigned hit
+        else:
+            return hits.iloc[0].loc[return_col]
+
+#------------------------------------------------------------------------------
+#obsolete
 def parse_new_txs(new_tx_paths, account_name, parser):
 
     """Import raw transactions from csv and return a tx_df in standard format,
@@ -201,79 +363,4 @@ def parse_new_txs(new_tx_paths, account_name, parser):
     return new_tx_df[['date', 'ITEM', '_item', 'net_amt']]
 
 
-
-
-#------------------------------------------------------------------------------
-    
-
-def assign_targets(_items, account,
-                   cat_db=None, unknowns_db=None, fuzzy_db=None,
-                   fuzzymatch=True, fuzzy_threshold=75):
-    """
-    - take iterable of items - eg column of new_tx df
-    - iterate over items (df.apply is not faster), generating matches
-      (and the 'mode' of the match) vs ref dbs (loaded in RAM)
-    - returns list of tuples: (hit target, mode of assignment)
-
-    """
-
-    results = []
-    for _item in _items:
-
-
-        #    TEST                     -> TUPLE TO APPEND TO RESULTS
-        # 1. is in unknowns_db?       -> ('unknown', 'old unknown')
-        # 2. is in cat_db?            -> (<the hit>, 'known'      )
-        # 3. is in fuzzy_db?          -> (<the hit>, 'old fuzzy'  )
-        # 4. fuzzy match in tx_db?    -> (<the hit>, 'new fuzzy'  )
-        # 5. ..else assign 'unknown'  -> ('unknown', 'new unknown')
-
-        if (unknowns_db is not None and len(unknowns_db) > 0
-                                   and unknowns_db.index.contains(_item)):
-            results.append(('unknown', 'old unknown'))
-            continue
-
-        if cat_db is not None and cat_db.index.contains(_item):
-            hits = cat_db.loc[[_item]]
-            results.append((pick_match(_item, account, hits), 'known'))
-            continue
-
-        if fuzzy_db is not None and fuzzy_db.index.contains(_item):
-            hits = fuzzy_db.loc[[_item]]
-            results.append((pick_match(_item, account, hits), 'old fuzzy'))
-            continue
-
-        if fuzzymatch and cat_db is not None:
-            best_match, score = process.extractOne(_item, cat_db.index.values,
-                                                   scorer=fuzz.token_set_ratio)
-            if score >= fuzzy_threshold:
-                hits = cat_db.loc[[best_match]]
-                results.append((pick_match(best_match, account, hits), 'new fuzzy'))
-                continue
-
-        results.append(('unknown', 'new unknown'))
-
-    return results
-
-
-
-def pick_match(item, account, hits, return_col='accY'):
-    """Returns match for item in sub_df of hits, giving preference for hits
-    in home account
-    """
-    # if only one match, return it
-    if len(hits) == 1:
-        return hits.loc[item,return_col]
-    
-    # if more than one, look for a hit in home account
-    if len(hits) > 1:
-        home_acc_hits = hits[hits['accX']==account]
-
-        # if any home hits, return the first - works even if multiple
-        if len(home_acc_hits) > 0:
-            return home_acc_hits.iloc[0].loc[return_col]
-
-        # if no home account hits, just return the first assigned hit
-        else:
-            return hits.iloc[0].loc[return_col]
 

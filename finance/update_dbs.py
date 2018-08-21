@@ -55,7 +55,6 @@ def update_fuzzy(account, fuzzy_db_path='fuzzy_db.csv', tx_db_path='tx_db.csv',
     modified = fuzzy_db.loc[fuzzy_db['status'] == 'modified']
     for tx in modified.index:
         new_val = modified.loc[tx, 'accY']
-        print(tx_db)
         edit_tx(tx_db, 'accY', new_val,
                 [tx_db['_item'] == tx,
                  tx_db['accX'] == account])
