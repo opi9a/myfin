@@ -10,11 +10,12 @@ from csv files:
     0. Look for new tx files in relevant folder - exit if not TODO
     1. If there is a prep.py, execute it TODO
     2. Load csvs and concat, using pd functions (keep in RAM) TODO
-    3. Check balance continuum
     3. Format and structure the csv, using a parser dict, to give a df with standard
        columns with <format_new_txs()>
 
-    4. assign target accounts to the items in the new tx df
+    4. Check balance continuum
+    5. Append to prev_txs.csv, net of any overlap
+    6. Get target accounts for the new txs (after netting)
        with <assign_targets()>:
         - checks against dbs if already:
             - known, in <cat_db>
@@ -25,9 +26,9 @@ from csv files:
         - (function also returns the 'mode', a description of how 
            assignment was made)
 
-    5. append any new fuzzy matches or unknowns to the corresponding db
+    7. append any new fuzzy matches or unknowns to the corresponding db
 
-    6. append new txs to tx_db
+    8. append new txs to tx_db
 
 """
 
@@ -80,9 +81,7 @@ def main(new_tx_paths, account_name, parser,
     fuzzy_db.to_csv(fuzzy_db_path)
 
     # finally append the new txs to the tx_db (with unique IDs)
-    if len(tx_db>0):
-        max_current = int(tx_db['id'].max())
-    else: max_current = 100
+    max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
 
     new_txs['id'] = np.arange(max_current + 1,
                               max_current + 1 + len(new_txs)).astype(int)
@@ -182,9 +181,10 @@ def format_new_txs(new_tx_df, account_name, parser):
     """
 
     # organise columns using parser, and add '_item' column
-    df = new_tx_df[list(parser['map'].values())]
+    df = new_tx_df[list(parser['map'].values())].copy()
     df.columns = parser['map'].keys()
-    df['date'] = pd.to_datetime(df['date']) 
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.set_index('date').sort_index()
     df['_item'] = df['ITEM'].str.lower().str.strip() 
 
     # for credit_debits, make a 'net_amt' column
@@ -198,7 +198,7 @@ def format_new_txs(new_tx_df, account_name, parser):
     if parser.get('debit_sign', 'positive') == 'positive':
         df['net_amt'] *= -1
         
-    cols = ['date', 'ITEM', '_item', 'net_amt']
+    cols = ['ITEM', '_item', 'net_amt']
 
     if 'balance' in parser['map']:
         cols.append('balance')
@@ -277,6 +277,7 @@ def assign_targets(_items, account,
     return results
 
 
+#------------------------------------------------------------------------------
 
 def pick_match(item, account, hits, return_col='accY'):
     """Returns match for item in sub_df of hits, giving preference for hits
@@ -297,6 +298,30 @@ def pick_match(item, account, hits, return_col='accY'):
         # if no home account hits, just return the first assigned hit
         else:
             return hits.iloc[0].loc[return_col]
+
+#------------------------------------------------------------------------------
+
+def trim_overlap(prev_txs_df, new_txs_df):
+    # get last tx of prev
+    # get last date of prev
+    # if not in dates in new then return
+    # make sub_df for that date in new_txs_df
+    #
+    if len(prev_txs_df) == 0:
+        return new_txs_df.copy()
+
+    df = new_txs_df.reset_index()
+    last_tx_of_prev = tuple(prev_txs_df.reset_index().iloc[-1])
+    match_index = -1
+    df_tuples = [tuple(y) for y in df.values]
+    for i, x in enumerate(df_tuples):
+        if x == last_tx_of_prev:
+            match_index = i
+    if match_index != -1:
+        return new_txs_df.iloc[(match_index + 1):].copy()
+    else:
+        return new_txs_df.copy()
+
 
 #------------------------------------------------------------------------------
 #obsolete
