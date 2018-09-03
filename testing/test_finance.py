@@ -6,7 +6,8 @@ from pprint import pprint
 import pytest
 
 import finance.load_new_txs as lntx
-from finance.init_scripts import initialise_project, populate_test_project
+from finance.init_scripts import (initialise_project, populate_test_project,
+                                  make_targets, check_seed)
 
 seed_df_path = '~/programming/python/myfin/testing/data_setup_test/test_csv_generator.csv'
 
@@ -28,6 +29,8 @@ def new_project_fx(scope='function'):
     new_proj_path = initialise_project(proj_name, overwrite_existing=False)
     seed_df = pd.read_csv(seed_df_path, parse_dates=['date'], dayfirst=True,
                                                              index_col='date')
+    check_seed(seed_df)
+
     populate_test_project(seed_df, new_proj_path)
 
     yield new_proj_path
@@ -85,12 +88,7 @@ def test_main_seq(new_project_fx):
 
     # - a folder for each accX
     assert set(os.listdir('tx_accounts')) == set(seed_df.accX.unique())
-    # - in each folder:
-        # - a parser.pkl
-        # - a prep.py
-        # - a prev_txs folder
-        # - a prev_txs.csv file with right no of txs
-        # - etc
+
 
     #-------------------------------------------------------------------------
     print(sep+'-- 1. PROCESS ANY NEW TRANSACTIONS IN TX_ACCOUNTS FILE STRUCTURE')
@@ -202,12 +200,9 @@ def test_main_seq(new_project_fx):
         print('\nexpected\n', list(seed_df_acc.loc[seed_df_acc.prev == 0, 'accY']))
         print('\nactual\n', [x[0] for x in accYs])
 
-        print('\n' + test_tag + 'assigned targets match seed accYs..', end='')
-        assert (list(seed_df_acc.loc[seed_df_acc.prev == 0, 'accY']) == 
-                                                        [x[0] for x in accYs])
-        print(' ..OK')
 
-        # make a df with accY column and mode
+        # make a df with accY, accY and mode columns
+        df['accX'] = acc
         df['accY'] = [x[0] for x in accYs]
         df['mode'] = [x[1] for x in accYs]
         print('\n---> new txs with accY and mode\n', df)
@@ -221,7 +216,6 @@ def test_main_seq(new_project_fx):
         new_fuzzies = (df.loc[df['mode'] == 'new fuzzy']
                          .set_index('_item', drop=True))
         new_fuzzies['status'] = 'unconfirmed'
-        new_fuzzies['accX'] = acc
         new_fuzzies = new_fuzzies[fuzzy_db.columns]
         print('\nnew fuzzy matches\n', new_fuzzies)
         fuzzy_db = fuzzy_db.append(new_fuzzies)
@@ -233,7 +227,6 @@ def test_main_seq(new_project_fx):
         print('\ninitial df\n', df)
         new_unknowns = (df.loc[df['mode'] == 'new unknown']
                          .set_index('_item', drop=True))
-        new_unknowns['accX'] = acc
         print('\nnew unknowns\n', new_unknowns)
         unknowns_db = unknowns_db.append(new_unknowns[unknowns_db.columns])
         print('\nnew unknowns db\n', unknowns_db)
@@ -246,7 +239,6 @@ def test_main_seq(new_project_fx):
 
         df['id'] = np.arange(max_current + 1,
                               max_current + 1 + len(df)).astype(int)
-        df['accX'] = acc
 
         print('\nfinal new txs df\n', df)
 
@@ -265,14 +257,43 @@ def test_main_seq(new_project_fx):
     os.chdir('..')
 
     tx_db.to_csv('tx_db.csv', date_format=parser['date_format'])
-    print('\nnew tx_db csv\n', pd.read_csv('tx_db.csv', parse_dates=['date'],
-                                            dayfirst=True, index_col='date'))
-    
     fuzzy_db.to_csv('fuzzy_db.csv')
-    print('\nnew fuzzy_db csv\n', pd.read_csv('fuzzy_db.csv'))
-
     unknowns_db.to_csv('unknowns_db.csv')
-    print('\nnew unknowns csv\n', pd.read_csv('unknowns_db.csv'))
+    
+    
+    #-------------------------------------------------------------------------
+    print(sep+'-- final tests')
+
+    # generate targets (what the seed_df should yield)
+    targets = make_targets(seed_df_path) 
+    print('targets loaded:', targets)
+
+
+    def _compare(stage, dbname, df):
+        """helper function to put together tests for each db"""
+
+        print('\n' + test_tag + 'testing', dbname, '- at stage', stage)
+
+        target_df = targets[stage][dbname]
+        target_df = target_df.sort_values(by=list(target_df.columns)).sort_index()
+        test_df = df[target_df.columns].copy()
+        test_df = test_df.sort_values(by=list(test_df.columns)).sort_index()
+
+        print('\ntest df from csv\n', test_df)
+        print('\ntarget df\n', target_df)
+
+        assert target_df.equals(test_df)
+        print(' ..OK******')
+
+    tx_db = pd.read_csv('tx_db.csv', parse_dates=['date'],
+                                            dayfirst=True, index_col='date')
+    _compare('loaded', 'tx_db', tx_db)
+
+    fuzzy_db = pd.read_csv('fuzzy_db.csv', index_col='_item')
+    _compare('loaded', 'fuzzy_db', fuzzy_db)
+
+    unknowns_db = pd.read_csv('unknowns_db.csv', index_col='_item')
+    _compare('loaded', 'unknowns_db', unknowns_db)
+
 
     os.chdir(init_dir)
-    

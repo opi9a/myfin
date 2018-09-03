@@ -6,6 +6,114 @@ from datetime import datetime as dt
 
 from finance.load_new_txs import make_parser
 
+def check_seed(df):
+    print('need to write code to check the seed to stop stupid errors'
+          'eg when the csv just has a stray cell')
+
+def make_targets(df_path):
+    """ create a set of dfs that represent the expected output of applying
+    the main sequence (in test) to the seed_df.
+
+    init phase(not tested):
+        - create and initialise file structure and db csvs
+        - distribute rows from seed_df to new/prev
+        - make db entries, based on 'db' field in seed_df:
+            - prev txs in tx_db (not necessary but may as well)
+            - known in cat_db
+            - unknown in unknowns_db
+            - fuzzy in fuzzy_db
+            - if 'fuzzed_ITEM' not nan, add that term to cat_db so can be found
+              in a fuzzy match
+
+    load phase:
+        - new_txs aggregated etc and loaded to tx_db, with assigned categories
+        - any new unknowns or fuzzies added to dbs
+
+    update phase: make changes to unknown or fuzzy:
+        unknown, where accY no longer == 'unknown':
+            - change tx_db accY to new accY from unknowns_db
+            - add entry to cat_db, with new accY
+            - remove from unknowns
+
+        fuzzy, where status == 'reject'
+            - change tx_db accY to 'unknown'
+            - add entry to unknowns_db, with accY = 'unknown'
+            - remove from fuzzy_db
+
+        fuzzy, where status == 'confirm'
+            - add entry to cat_db, with accY of accY from fuzzy_db
+            - remove from fuzzy_db
+
+        fuzzy, where status == 'modified'
+            - xx
+
+        changes for initial tx_db
+    Everything copied direct except accY, which is unknown unless found in a db
+     - in known or fuzzy, leave in the accY from the seed df
+     - in unknown, overwrite with 'unknown'
+     - in None: overwrite with 'unknown' unless it is a new fuzzy, and has an
+                entry in 'fuzzed_ITEM'
+    """
+
+    cols = ['_item', 'accX', 'accY']
+    out_dfs = dict(loaded={}, updated={})
+
+    df = pd.read_csv(df_path, parse_dates=['date'], dayfirst=True,
+                     index_col='date')
+    df = df.drop(['init', 'update', 'load'], axis=1) 
+
+    # make balance and item columns
+    # don't think balance needed. Is dropped later but keep code for now.
+    df['balance'] = 0
+
+    for acc in df['accX'].unique():
+            df.loc[df['accX'] == acc, 'balance'] \
+                  = df.loc[df['accX']== acc, 'net_amt'].cumsum()
+
+            df['_item'] = df['ITEM'].str.lower().str.strip()
+            
+
+    # DBS AFTER LOADING
+
+    # make tx_db as it would be after correct loading of txs
+    df['orig_accY'] = df['accY'].copy()
+    df.loc[df['db'] == 'unknown', 'accY'] = 'unknown'
+    df.loc[(df['db'] == 'None') &
+           (df['fuzzed_ITEM'].isnull()), 'accY'] = 'unknown'
+
+    out_dfs['loaded']['tx_db'] =  df[['ITEM', '_item', 'accX',
+                                    'accY', 'net_amt']]
+
+    # now the unknowns: rows labelled in 'db', plus any new unknowns found in
+    # assign_targets process - ie those with db==None but no fuzzy match
+    # (fuzzed_ITEM)
+
+    mask = (df['db'] == 'unknown')
+    mask = mask | ((df['db'] == 'None') & (df['fuzzed_ITEM'].isnull()))
+
+    unknowns_out = df.loc[mask, cols].set_index('_item', drop=True)
+    out_dfs['loaded']['unknowns_db'] = unknowns_out 
+
+
+    # fuzzy_db: rows labelled in 'db' plus any new fuzzy matches
+    #  - i.e. anything where fuzzed ITEM is not nan
+    mask = df['db'] == 'fuzzy'
+    mask = mask | (~df['fuzzed_ITEM'].isnull())
+
+    fuzzy_out = df.loc[mask, cols].set_index('_item', drop=True)
+    fuzzy_out['status'] = 'unconfirmed'
+
+    out_dfs['loaded']['fuzzy_db'] = fuzzy_out 
+
+    # DBS AFTER UPDATE
+
+    # unknowns: move out any 
+
+    return out_dfs
+
+
+
+
 def populate_test_project(seed_df, proj_name=None, return_df=False):
     """Using a seed_df source file with transactions data and other info, 
     create and populate a project, with transaction accounts - including
@@ -22,6 +130,7 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
 
     # First copy to the dbs at highest folder level, as reqd
     unknowns = df.loc[df.db=='unknown', ['_item', 'accX', 'accY']]
+    unknowns['accY'] = 'unknown'
     unknowns.to_csv('unknowns_db.csv', mode='a', header=False, index=False)
 
     knowns = df.loc[df.db=='known', ['_item', 'accX', 'accY']]
@@ -38,6 +147,12 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
     prev_txs['id'] = np.arange(max_current + 1,
                                max_current + 1 + len(prev_txs)).astype(int)
     prev_txs['mode'] = 'x'
+
+    # need to make sure accYs are correct
+    # will need to overwrite with unknown if db=unknown or None
+    mask = (prev_txs['db']=='unknown') | (prev_txs['db']=='None')
+    prev_txs.loc[mask,'accY'] = 'unknown'
+
     (prev_txs.loc[:,['date', 'accX', 'accY', 'net_amt', 'ITEM',
                      '_item', 'id', 'mode']]
             .to_csv('tx_db.csv', mode='a', header=False, index=False))
@@ -70,6 +185,7 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
         (txs.loc[txs['prev'] == 1, prev_tx_cols]
             .to_csv('prev_txs.csv', mode='a', header=False, index=False))
 
+        # return txs
         # now the new_txs, in accs specified by 'new_file_index'
         new = txs.loc[txs['new_file_index'] > 0].copy()
 
