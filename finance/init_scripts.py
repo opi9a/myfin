@@ -138,7 +138,7 @@ def make_targets(df_path, append_df=False):
         by_tups[db] = (out_dfs['loaded'][db].reset_index().copy()
                                             .set_index(['_item', 'accX']))
 
-    df_tup = df_tup = df.reset_index().set_index(['_item', 'accX']) 
+    df_tup = df.reset_index().set_index(['_item', 'accX']) 
     
     # # unknowns:  where accY no longer == 'unknown':
     # #         - remove from unknowns

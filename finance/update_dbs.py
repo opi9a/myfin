@@ -73,6 +73,96 @@ def update_fuzzy(account, fuzzy_db_path='fuzzy_db.csv', tx_db_path='tx_db.csv',
     
 
 #------------------------------------------------------------------------------
+
+def new_updater(unknowns_db_path='unknowns_db.csv',
+                cat_db_path='cat_db.csv',
+                tx_db_path='tx_db.csv',
+                fuzzy_db_path='fuzzy_db.csv',
+                return_dbs=False):
+
+    tx_db = pd.read_csv(tx_db_path, index_col='date')
+    unknowns_db = pd.read_csv(unknowns_db_path, index_col='_item')
+    cat_db = pd.read_csv(cat_db_path, index_col='_item')
+    fuzzy_db = pd.read_csv(fuzzy_db_path, index_col='_item')
+
+    tx_by_tup = tx_db.copy().reset_index().set_index(['_item', 'accX']).sort_index()
+    un_by_tup = unknowns_db.copy().reset_index().set_index(['_item', 'accX'])
+    fz_by_tup = fuzzy_db.copy().reset_index().set_index(['_item', 'accX'])
+    ca_by_tup = cat_db.copy().reset_index().set_index(['_item', 'accX'])
+
+    # unknowns: any accY != unknown:
+        # overwrite tx_db rows
+        # append to cat_db
+        # delete from unknowns
+
+    # overwrite tx_db
+    tuples_to_change = un_by_tup.index[un_by_tup['accY'] != 'unknown']
+    rows_to_change = tx_by_tup.loc[tx_by_tup.index.isin(tuples_to_change)]
+    new_vals = pd.Series(tuple(rows_to_change.index)).apply(lambda x: un_by_tup.loc[x])
+    tx_by_tup.loc[tx_by_tup.index.isin(tuples_to_change), 'accY'] = new_vals.values
+    tx_db = tx_by_tup.reset_index().set_index('date')
+
+    # append to cat_db
+    ca_by_tup = ca_by_tup.append(un_by_tup[un_by_tup['accY'] != 'unknown'])  
+    cat_db = ca_by_tup.reset_index().set_index('_item')
+
+    # delete from unknowns
+    un_by_tup = un_by_tup.drop(tuples_to_change)
+    unknowns_db = un_by_tup.reset_index().set_index('_item')
+    
+
+    # fuzzys: status=='reject':
+        # overwrite tx_db rows with 'unknown'
+        # append to unknowns_db
+        # delete from fuzzy_db
+
+    # get the tuples to change
+    tuples_to_change = fz_by_tup.index[fz_by_tup['status'] == 'rejected']
+
+    # overwrite tx_db rows with 'unknown'
+    tx_by_tup.loc[tx_by_tup.index.isin(tuples_to_change), 'accY'] = 'unknown'
+    tx_db = tx_by_tup.reset_index().set_index('date')
+    
+    # append to unknowns_db
+    appendee = pd.DataFrame(index=tuples_to_change)
+    appendee['accY'] = 'unknown'
+    un_by_tup = un_by_tup.append(appendee)
+    unknowns_db = un_by_tup.reset_index().set_index('_item')
+
+    # delete from fuzzy_db
+    fz_by_tup = fz_by_tup.drop(tuples_to_change)
+    fuzzy_db = fz_by_tup.reset_index().set_index('_item')
+    
+
+    # fuzzys: status=='confirm':
+        # append to cat_db
+        # delete from fuzzy_db
+
+    # get the tuples to change
+    print(fz_by_tup)
+    tuples_to_change = fz_by_tup.index[fz_by_tup['status'] == 'confirmed']
+    print(tuple(tuples_to_change))
+
+    # append to cat_db
+    appendee = pd.DataFrame(fz_by_tup.loc[tuples_to_change, 'accY'])
+    ca_by_tup = ca_by_tup.append([appendee])
+    cat_db = ca_by_tup.reset_index().set_index('_item')
+
+    # delete from fuzzy_db
+    fz_by_tup = fz_by_tup.drop(tuples_to_change)
+    fuzzy_db = fz_by_tup.reset_index().set_index('_item')
+
+    tx_db.to_csv(tx_db_path)
+    unknowns_db.to_csv(unknowns_db_path)
+    cat_db.to_csv(cat_db_path)
+    fuzzy_db.to_csv(fuzzy_db_path)
+
+    if return_dbs:
+        return dict(tx_db = tx_db, cat_db=cat_db,
+                    unknowns_db=unknowns_db, fuzzy_db=fuzzy_db)
+
+
+#------------------------------------------------------------------------------
     
 def update_unknowns(account, unknowns_path='unknowns_db.csv',
                     cat_db_path='cat_db.csv', tx_db_path='tx_db.csv',
