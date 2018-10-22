@@ -6,36 +6,45 @@ from pprint import pprint
 import pytest
 
 import finance.load_new_txs as lntx
+from finance.load_new_txs import _prtitle, _db_compare, load_new
+
 from finance.init_scripts import (initialise_project, populate_test_project,
-                                  make_targets, check_seed)
+                                  xmake_targets, check_seed)
+from finance.update_dbs import new_updater
 
 seed_df_path = '~/programming/python/myfin/testing/data_setup_test/test_csv_generator.csv'
 
-test_tag = '***TEST: '
 
 #--------------- FIXTURES AND CONSTANTS ---------------------------------------
 
 @pytest.fixture
-def new_project_fx(scope='function'):
+def new_project_fx(scope="module"):
     """Create a new project file structure, with two tx_account folders.
     Populates with test data in the seed_df.
     Yields the path of the project root.
     """
     proj_name = 'new_test_project'
+
+    if check_seed(seed_df_path):
+        print('check_seed fail')
+        return 1
+
     if os.path.exists(proj_name):
         print('found an existing project named', proj_name, '- removing')
         rmtree(proj_name)
+
+    print('\nsetting up fixture')
     new_proj_path = initialise_project(proj_name, overwrite_existing=False)
+
     seed_df = pd.read_csv(seed_df_path, parse_dates=['date'], dayfirst=True,
                                                              index_col='date')
-    check_seed(seed_df)
-
     populate_test_project(seed_df, new_proj_path)
 
     yield new_proj_path
     # return new_proj_path
 
     # teardown
+    print('\ntearing down fixture')
     rmtree(new_proj_path)
 
 proj_directory = {'tx_db.csv',
@@ -66,7 +75,7 @@ def test_main_seq(new_project_fx):
     print('\n---> seed_df loaded\n', seed_df)
 
     # generate targets (what the seed_df should yield)
-    targets = make_targets(seed_df_path) 
+    targets = xmake_targets(seed_df_path) 
     print('targets loaded:')
     for stage in targets:
         for db in targets[stage]:
@@ -78,36 +87,65 @@ def test_main_seq(new_project_fx):
 
     # make some changes to unknowns_db and fuzzy_db, acc to seed_df
     # get tuples to changeo
-    write_updates(seed_df)
+    make_db_changes(seed_df)
 
     # run function testing update procedure
-    run_update(seed_df, targets)
+    run_updater(seed_df, targets)
 
     # go back where we started
     os.chdir(init_dir)
 
+    print('\nnew test project in main?:', os.path.exists('new_test_project'))
+
+# def test_x():
+    # print('\nnew test project in test_x?:', os.path.exists('new_test_project'))
+    # # print('/ntx_db\n', pd.read_csv('new_test_project/tx_db.csv'))
+
 
 #-------------- sub functions -------------------------------------------------
 
-def write_updates(seed_df):
+def make_db_changes(seed_df):
+    """make changes to the dbs on disc, simulating user manual editing.
+    Changes are defined in the 'update_action' column of the seed df.
+    """
 
-    # going to use the index_by_tuple / get tuples and new values 
-    # make changes pattern
+    # pattern:
+        # get (_item, accX) tuples that need changing (tuples_to_change):
+          # eg rows in unknowns where update_action in seed is not null
+        # get new values for those from seed_df['update_action']
+            # issue here is that may be duplicates of these, so need to make
+            # sure the seed_df is processed to get unique tuples in index
+        # set target db accYs to new values, eg:
+            # unknowns_db.loc[tuples, 'accY'] = newvals
+
+    _prtitle('Making changes to dbs to simulate manual curation')
 
     # first get a version of seed_df indexed by _item, accX tuples
     df_tup = seed_df.copy().reset_index().set_index(['_item', 'accX'])
+    df_tup = df_tup.loc[~df_tup['update_action'].isnull()]
+    df_tup = lntx.tidy(df_tup['update_action'])
+    print('\ndf_tup: tidy version of seed_df, with update actions\n', df_tup)
 
-    # anything in unknowns with an action in seed_df[update_action]:
+    # 1. unknowns:
+        # change: anything in unknowns with an update action in seed_df
         # - overwrite with corresponding value in seed_df[update_action]
 
     unknowns_db = (pd.read_csv('unknowns_db.csv', index_col='_item')
                            .reset_index().set_index(['_item', 'accX']))
+    print('\nChanging unknowns_db.  Original:\n', unknowns_db)
 
-    tuples_to_change = (unknowns_db.loc[~df_tup.loc[unknowns_db.index,
-                                                    'update_action'].isnull()]
-                                                                       .index)
-    new_vals = df_tup.loc[tuples_to_change, 'update_action']
-    unknowns_db.loc[tuples_to_change, 'accY'] = new_vals
+    # build a mask to get the tuples to change
+    mask1 = df_tup.index.isin(unknowns_db.index)
+    mask2 = ~df_tup['update_action'].isnull()
+    mask = mask1 & mask2
+    tuples_to_change = df_tup.loc[mask].index
+    print('\ntuples to change (indexer)\n', tuple(tuples_to_change))
+
+    new_vals = df_tup.loc[mask]
+    print('\nnew_vals\n', new_vals)
+
+    unknowns_db.loc[tuples_to_change, 'accY'] = new_vals.values
+    print('\nunknowns db after change\n', unknowns_db)
 
     unknowns_db.reset_index().set_index('_item').to_csv('unknowns_db.csv')
 
@@ -116,275 +154,52 @@ def write_updates(seed_df):
         
     fuzzy_db = (pd.read_csv('fuzzy_db.csv', index_col='_item')
                            .reset_index().set_index(['_item', 'accX']))
+    print('\nChanging fuzzy_db.  Original:\n', fuzzy_db)
 
+    mask = ~df_tup.loc[fuzzy_db.index, 'update_action'].isnull()
+    tuples_to_change = (fuzzy_db.loc[mask].index)
+    print('\ntuples to change (indexer)\n', tuple(tuples_to_change))
 
-    tuples_to_change = (fuzzy_db.loc[~df_tup.loc[fuzzy_db.index,
-                                                    'update_action'].isnull()]
-                                                                       .index)
     new_vals = df_tup.loc[tuples_to_change, 'update_action']
-    fuzzy_db.loc[tuples_to_change, 'status'] = new_vals
+    print('\nnew_vals\n', new_vals)
+
+    fuzzy_db.loc[tuples_to_change, 'status'] = new_vals.values
+    print('\nfuzzy db after change\n', fuzzy_db)
 
     fuzzy_db.reset_index().set_index('_item').to_csv('fuzzy_db.csv')
-        
-#------------------------------------------------------------------------------
 
-def load_new(seed_df, targets):
-    # begin with a test folder structure, as generated by populate_test_project,
-    # and the seed df that was used to populate it
 
-    #-------------------------------------------------------------------------
-    _prtitle('-- 0. SETTING UP')
 
-    #-------------------------------------------------------------------------
-    _prtitle('-- 0.1 reading in the seed_df')
+def run_updater(seed_df, targets):
+    """test outputs of updater function
+    """
 
+    _prtitle('Running Updates')
 
-    #-------------------------------------------------------------------------
-    _prtitle('-- 0.2 reading in the db csvs')
+    # print('\nunknowns_db before updating\n', pd.read_csv('unknowns_db.csv'))
+    new_updater()
+    # print('\nunknowns_db after updating\n', pd.read_csv('unknowns_db.csv'))
 
-    unknowns_db = pd.read_csv('unknowns_db.csv', index_col='_item')
-    tx_db = pd.read_csv('tx_db.csv', index_col='date')
-    fuzzy_db = pd.read_csv('fuzzy_db.csv', index_col='_item')
-    cat_db = pd.read_csv('cat_db.csv', index_col='_item')
+    print('\ntesting tx_db after update..', end='')
+    tx_db = pd.read_csv('tx_db.csv', index_col='date', parse_dates=['date'])
 
-    #-------------------------------------------------------------------------
-    _prtitle('-- 0.3 checking file structure')
+    print('\nfull set of columns (not all kept for test)\n', tx_db.columns)
 
-    # 1. check initialisation of test structure
-    # - check high level folder has right contents
-    print('\n' + test_tag + 'number of files in project directory..', end='')
-    assert set(os.listdir()) == proj_directory
-    print(' ..OK')
+    test_cols = ['_item', 'accX', 'accY', 'net_amt']
+    test = tx_db[test_cols].sort_index()
+    target = targets['updated']['tx_db'][test_cols].copy().sort_index()  
+    print('\ntest\n', test)
+    print('\ntarget\n', target)
 
-    # - a folder for each accX
-    assert set(os.listdir('tx_accounts')) == set(seed_df.accX.unique())
+    _db_compare(target, test)
 
 
-    #-------------------------------------------------------------------------
-    _prtitle('-- 1. PROCESS ANY NEW TRANSACTIONS IN TX_ACCOUNTS FILE STRUCTURE')
 
-    os.chdir('tx_accounts')
-    print('\nFound tx accounts:', os.listdir())
+#---------- helper functions  ------------------------------------------------
 
-    for acc in os.listdir():
-        _prtitle('PROCESSING', acc)
-        os.chdir(acc)
+# def test_temp(new_project_fx):
+#     print('\nnew test project in test-temp?:', os.path.exists('new_test_project'))
+#     print(os.listdir())
+#     print(pd.read_csv('new_test_project/tx_db.csv'))
 
-        # just continue if no new files (remembering to exit account folder)
-        if len(os.listdir('new_txs')) == 0:
-            print('  ..no new files')
-            os.chdir('..')
-            continue
-
-        # otherwise process them
-        print('  ..found new files', os.listdir('new_txs'))
-
-        seed_df_acc = seed_df.loc[seed_df['accX'] == acc].copy()
-        seed_df_acc['balance'] = seed_df_acc['net_amt'].cumsum()
-        print('\n---> seed_df for this acc:\n', seed_df_acc)
-
-        #----------------------------------------------------------------------
-        _prtitle(' i. Look for prep.py and execute if present', acc)
-
-        if os.path.exists('prep.py'):
-            print('\n' + test_tag + 'Found a prep.py, so executing it..', end='')
-            exec(open('prep.py').read())
-            assert os.path.exists('prep.exec.out')
-            print('..OK')
-
-        #----------------------------------------------------------------------
-        _prtitle(' ii. Load new tx csvs and concat, using pandas', acc)
-
-        os.chdir('new_txs')
-        df = pd.concat([pd.read_csv(x) for x in os.listdir()])
-        print('\n---> loaded csv files and concatted:\n', df)
-        os.chdir('..')
-
-        #----------------------------------------------------------------------
-        _prtitle('  iii. Format and structure the csv using parser', acc)
-
-        parser = pd.read_pickle('parser.pkl')
-        print('\n---> loaded parser:'); pprint(parser)
-        df = lntx.format_new_txs(df, account_name=acc, parser=parser)
-        df = df.sort_values('date')
-        print('\n---> df after format_new_txs\n', df) 
-
-        #----------------------------------------------------------------------
-        _prtitle(' iv. Check balance continuum and duplicates in aggregated txs', acc)
-
-        print('balance continuum', lntx.balance_continuum(df))
-
-        if lntx.balance_continuum(df).sum() != 0:
-            print('WARNING:', acc, 'has a balance discontinuity')
-
-        if len(df) > 2:
-            print('bad balance continuum',
-                    lntx.balance_continuum(df.drop(df.index[1])))
-        else:
-            print('(did not check for balance discontinuity as df too short)')
-
-        print('duplicates:', df.duplicated().values)
-
-        if df.duplicated().values.sum() != 0:
-            print('WARNING:', acc, 'has duplicated values')
-
-
-        #----------------------------------------------------------------------
-        _prtitle(' v. Append to prev_txs.csv, net of any overlap', acc)
-
-        # get the target for comparison from the seed df
-        seed_df_new_cols = ['ITEM', '_item', 'net_amt', 'balance']
-        seed_df_new = seed_df_acc.loc[seed_df_acc.prev == 0, seed_df_new_cols]
-        print('\n---> real new txs from seed')
-        print(seed_df_new)
-
-        # load the prev_txs
-        prev_txs_df = pd.read_csv('prev_txs.csv', parse_dates=['date'],
-                                            dayfirst=True, index_col='date')
-        print('\n---> prev_txs_df\n', prev_txs_df)
-
-        # get the trimmed df and run the test
-        df = lntx.trim_overlap(prev_txs_df, df)
-        print('\n---> df after trim\n', df)
-        print('\n' + test_tag + 'overlap removal from df..', end='')
-        assert df.equals(seed_df_new)
-        print(' ..OK')
-
-        df.to_csv('prev_txs.csv', mode='a', header=False,
-                                    date_format=parser['date_format'])
-
-        print('\n---> saved prev_txs', pd.read_csv('prev_txs.csv',
-                                      parse_dates=['date'], index_col='date'))
-
-        #----------------------------------------------------------------------
-        _prtitle(' vi. Compute the target accounts for new items', acc)
-
-        accYs = lntx.assign_targets(df._item, acc,
-                                    unknowns_db=unknowns_db,
-                                    fuzzy_db=fuzzy_db,
-                                    cat_db=cat_db,
-                                   )
-        print('\naccY targets assigned\n', accYs)
-
-
-        # make a df with accY, accY and mode columns
-        df['accX'] = acc
-        df['accY'] = [x[0] for x in accYs]
-        df['mode'] = [x[1] for x in accYs]
-        print('\n---> new txs with accY and mode\n', df)
-
-        #----------------------------------------------------------------------
-        _prtitle(' vii. Append any new fuzzy matches or unknowns to corresponding db', acc)
-
-
-        # get fuzzy matches
-        print('\ninitial fuzzy db\n', fuzzy_db)
-        new_fuzzies = (df.loc[df['mode'] == 'new fuzzy']
-                         .set_index('_item', drop=True))
-        new_fuzzies['status'] = 'unconfirmed'
-        new_fuzzies = new_fuzzies[fuzzy_db.columns]
-        print('\nnew fuzzy matches\n', new_fuzzies)
-        fuzzy_db = fuzzy_db.append(new_fuzzies)
-        print('\nnew fuzzy db\n', fuzzy_db)
-
-
-        # get unknowns
-        print('\n' + '-'*30 + '\ninitial unknowns db\n', unknowns_db)
-        print('\ninitial df\n', df)
-        new_unknowns = (df.loc[df['mode'] == 'new unknown']
-                         .set_index('_item', drop=True))
-        print('\nnew unknowns\n', new_unknowns)
-        unknowns_db = unknowns_db.append(new_unknowns[unknowns_db.columns])
-        print('\nnew unknowns db\n', unknowns_db)
-
-        #----------------------------------------------------------------------
-        _prtitle(' viii. Append any new txs to tx_db', acc)
-
-        max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
-
-        df['id'] = np.arange(max_current + 1,
-                              max_current + 1 + len(df)).astype(int)
-
-        print('\nfinal new txs df\n', df)
-
-        tx_db = tx_db.append(df[tx_db.columns])
-
-        print('\ntx_db after appending df\n', tx_db)
-
-
-        os.chdir('..')
-
-
-    #-------------------------------------------------------------------------
-    _prtitle('saving dbs to disk (tx, fuzzy, unknown only)')
-
-    # move back up, from tx_accounts to main project directory
-    os.chdir('..')
-
-    tx_db.to_csv('tx_db.csv', date_format=parser['date_format'])
-    fuzzy_db.to_csv('fuzzy_db.csv')
-    unknowns_db.to_csv('unknowns_db.csv')
-    
-    
-    #-------------------------------------------------------------------------
-    _prtitle(' FINAL TESTS')
-
-
-    def _compare(stage, dbname, df):
-        """helper function to put together tests for each db"""
-
-        print('\n' + test_tag + 'testing', dbname, '- at stage', stage)
-
-        target_df = targets[stage][dbname]
-        target_df = (target_df.sort_values(by=list(target_df
-                                                   .columns)).sort_index())
-        test_df = df[target_df.columns].copy()
-        test_df = test_df.sort_values(by=list(test_df.columns)).sort_index()
-
-        print('\ntest df from csv\n', test_df)
-        print('\ntarget df\n', target_df)
-
-        assert target_df.equals(test_df)
-        print(' ..OK******')
-
-    tx_db = pd.read_csv('tx_db.csv', parse_dates=['date'],
-                                            dayfirst=True, index_col='date')
-    _compare('loaded', 'tx_db', tx_db)
-
-    fuzzy_db = pd.read_csv('fuzzy_db.csv', index_col='_item')
-    _compare('loaded', 'fuzzy_db', fuzzy_db)
-
-    unknowns_db = pd.read_csv('unknowns_db.csv', index_col='_item')
-    _compare('loaded', 'unknowns_db', unknowns_db)
-
-
-    print('\nnew test project in?:', os.path.exists('new_test_project'))
-
-
-#------------------------------------------------------------------------------
-
-def run_update(seed_df, targets):
-    assert 1
-
-    # call update_fuzzy and update_unknowns
-
-    # assert results equal to targets
-    
-    print('\nnew test project in?:', os.path.exists('new_test_project'))
-    print('\nhaz seed df?\n', seed_df)
-
-#---------- helper functions  -------------------------------------------------
-# 
-
-def _prtitle(titlestring, acc=None, width=90):
-    if acc is None:
-        acc = ""
-    else:
-        acc = "[ " + acc + " ]"
-    lines = []
-    lines.append("-" * width)
-    lines.append(" ".join(["~", acc, titlestring]))
-    lines.append("-" * width)
-    for l in lines:
-        print(l)
 

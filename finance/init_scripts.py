@@ -4,217 +4,200 @@ import os
 from shutil import copyfile, rmtree
 from datetime import datetime as dt
 
-from finance.load_new_txs import make_parser
+from finance.load_new_txs import make_parser, tidy
 
-def check_seed(df):
-    print('need to write code to check the seed to stop stupid errors'
-          'eg when the csv just has a stray cell')
 
-def make_targets(df_path, append_df=False):
-    """ create a set of dfs that represent the expected output of applying
-    the main sequence (in test) to the seed_df.
+def check_seed(seed_df_path):
+    print('\nChecking seed.. ', end='')
 
-    init phase(not tested):
-        - create and initialise file structure and db csvs
-        - distribute rows from seed_df to new/prev
-        - make db entries, based on 'db' field in seed_df:
-            - prev txs in tx_db (not necessary but may as well)
-            - known in cat_db
-            - unknown in unknowns_db
-            - fuzzy in fuzzy_db
-            - if 'fuzzed_ITEM' not nan, add that term to cat_db so can be found
-              in a fuzzy match
+    df = pd.read_csv(seed_df_path, parse_dates=['date'],
+                     dayfirst=True, index_col='date')
 
-    load phase:
-        - new_txs aggregated etc and loaded to tx_db, with assigned categories
-        - any new unknowns or fuzzies added to dbs
+    # whitelist designations in fuzzy_db (and knowns, shd not have any)
+    mask = (~df['update_action'].isnull()) & (df['db'] != 'unknown')
+    whitelist = {'rejected', 'confirmed'}
 
-    update phase: make changes to unknown or fuzzy:
-        unknown, where accY no longer == 'unknown':
-            - change tx_db accY to new accY from unknowns_db
-            - add entry to cat_db, with new accY
-            - remove from unknowns
+    if not df.loc[mask, 'update_action'].isin(whitelist).all():
+        print('\nSeed df update actions out of whitelist:')
+        print(set(df.loc[mask, 'update_action'].values) - whitelist)
+        return 1
 
-        fuzzy, where status == 'reject'
-            - change tx_db accY to 'unknown'
-            - add entry to unknowns_db, with accY = 'unknown'
-            - remove from fuzzy_db
+    # if there is a fuzzed_ITEM, the db must be None (or it
+    # will not go through fuzzy matching)
+    mask = (~df['fuzzed_ITEM'].isnull()) & (df['db'] != 'None')
 
-        fuzzy, where status == 'confirm'
-            - add entry to cat_db, with accY of accY from fuzzy_db
-            - remove from fuzzy_db
+    if len(df.loc[mask]):
+        print("fuzzed_ITEM also appearing in a db")
+        return 1
 
-        fuzzy, where status == 'modified'
-            - xx
+    # update actions for unknowns (new accYs) must correspond to accY col
+    mask = (~df['update_action'].isnull()) & (df['db'] == 'unknown')
 
-        changes for initial tx_db
-    Everything copied direct except accY, which is unknown unless found in a db
-     - in known or fuzzy, leave in the accY from the seed df
-     - in unknown, overwrite with 'unknown'
-     - in None: overwrite with 'unknown' unless it is a new fuzzy, and has an
-                entry in 'fuzzed_ITEM'
-    """
+    if not df.loc[mask, 'update_action'].equals(df.loc[mask, 'accY']):
+        print("Update_action field of seed_df doesn't match accYs")
+        return 1
 
+    # types of columns are right
+    if not df.index.is_all_dates:
+        print('Seed df index is not dates')
+        return 1
+
+    if not np.issubdtype(df['net_amt'], np.number):
+        print('Seed df net_amt is not numeric')
+        return 1
+
+    if not df['prev'].isin({0, 1}).all():
+        print('Seed df prev is not all 0 or 1')
+        return 1
+
+    if not df['db'].isin({'unknown', 'known', 'fuzzy', 'None'}).all():
+        print('dbs not recognised')
+        return 1
+
+    print('..OK')
+
+    return 0
+
+
+def xmake_targets(seed_df_path, return_seed=False):
+    # load the seed df
     cols = ['_item', 'accX', 'accY']
-    out_dfs = dict(loaded={}, updated={})
+    out = dict(loaded={}, updated={})
 
-    df = pd.read_csv(df_path, parse_dates=['date'], dayfirst=True,
+    seed = pd.read_csv(seed_df_path, parse_dates=['date'], dayfirst=True,
                      index_col='date')
-    df = df.drop(['init', 'update', 'load'], axis=1) 
 
-    # make balance and item columns
-    # don't think balance needed. Is dropped later but keep code for now.
-    df['balance'] = 0
+    seed['_item'] = seed['ITEM'].str.lower().str.strip()
 
-    for acc in df['accX'].unique():
-            df.loc[df['accX'] == acc, 'balance'] \
-                  = df.loc[df['accX']== acc, 'net_amt'].cumsum()
+    # way to unknown:
+        # db==unknown
+        # db==None and no fuzzed_ITEM
+    mask1 = (seed['db'] == 'unknown')
+    mask2 = (seed['db'] == 'None') & (seed['fuzzed_ITEM'].isnull())
+    mask = mask1 | mask2
+    df = seed.loc[mask, ['_item', 'accX']]
+    df = df.reset_index(drop=True).set_index('_item')
+    df['accY'] = 'unknown'
+    out['loaded']['unknowns_db'] = tidy(df)
 
-            df['_item'] = df['ITEM'].str.lower().str.strip()
-            
+    # knowns: rows where db==known, and make a target for any fuzzed_ITEMs
+    mask = (seed['db'] == 'known')
+    df = seed.loc[mask, ['_item', 'accX', 'accY']]
+    df = df.reset_index(drop=True).set_index('_item')
 
-    # DBS AFTER LOADING
-
-    # make tx_db as it would be after correct loading of txs
-    df['orig_accY'] = df['accY'].copy()
-    df.loc[df['db'] == 'unknown', 'accY'] = 'unknown'
-    df.loc[(df['db'] == 'None') &
-           (df['fuzzed_ITEM'].isnull()), 'accY'] = 'unknown'
-
-    tx_db = df[['ITEM', '_item', 'accX', 'accY', 'net_amt']].copy()
-    out_dfs['loaded']['tx_db'] = tx_db.copy()
-
-    # now the unknowns: rows labelled in 'db', plus any new unknowns found in
-    # assign_targets process - ie those with db==None but no fuzzy match
-    # (fuzzed_ITEM)
-
-    mask = (df['db'] == 'unknown')
-    mask = mask | ((df['db'] == 'None') & (df['fuzzed_ITEM'].isnull()))
-
-    unknowns_db = df.loc[mask, cols].set_index('_item', drop=True)
-    out_dfs['loaded']['unknowns_db'] = unknowns_db.copy()
-
-
-    # fuzzy_db: rows labelled in 'db' plus any new fuzzy matches
-    #  - i.e. anything where fuzzed ITEM is not nan
-    mask = df['db'] == 'fuzzy'
-    mask = mask | (~df['fuzzed_ITEM'].isnull())
-
-    fuzzy_db = df.loc[mask, cols].set_index('_item', drop=True)
-    fuzzy_db['status'] = 'unconfirmed'
-
-    out_dfs['loaded']['fuzzy_db'] = fuzzy_db.copy()
-
-    # cat_db has txs with db = known..
-    cat_db = df.loc[df['db'] == 'known', cols].set_index('_item', drop=True)
-
-    #  plus the target for any new fuzzies to be found:
-    #  - db=None, fuzzed_ITEM not nan but accY = fuzzed_ITEM
-    fuzzy_targets = df.loc[~df['fuzzed_ITEM'].isnull(),
-                           ['fuzzed_ITEM', 'accX', 'accY']].copy()
+    # add rows for any fuzzed_ITEMs
+    fuzzy_targets = seed.loc[~seed['fuzzed_ITEM'].isnull(),
+                             ['fuzzed_ITEM', 'accX', 'accY']].copy()
 
     fuzzy_targets['_item'] = (fuzzy_targets['fuzzed_ITEM']
                                         .str.lower().str.strip())
-    fuzzy_targets = fuzzy_targets.set_index('_item', drop=True)
-    # fuzzy_targets.columns = ['accX', 'accY', 'fuzzed_ITEM']
-    print('\nfuzzy_targets\n', fuzzy_targets)
-    cat_db = cat_db.append(fuzzy_targets[['accX', 'accY']])
+    fuzzy_targets = tidy(fuzzy_targets.set_index('_item', drop=True))
+    df = df.append(fuzzy_targets[['accX', 'accY']])
+    out['loaded']['cat_db'] = tidy(df)
+
+    # fuzzy_db: rows where db==fuzzy and any new fuzzies
+    mask = (seed['db'] == 'fuzzy') | (~seed['fuzzed_ITEM'].isnull())
+    df = seed.loc[mask, ['_item', 'accX', 'accY']]
+    df = df.reset_index(drop=True).set_index('_item')
+    out['loaded']['fuzzy_db'] = tidy(df)
+
+    # tx_db: copy seed, but overwrite any unknowns (incl after fuzzy matches)
+    df = seed.copy()
+    df.loc[df['db'] == 'unknown', 'accY'] = 'unknown'
+    df.loc[(df['db'] == 'None') &
+           (df['fuzzed_ITEM'].isnull()), 'accY'] = 'unknown'
+    df = df[['accX', 'accY', 'net_amt', 'ITEM', '_item']]
+
+    out['loaded']['tx_db'] = df
+
+    # UPDATED
+
+    # unknowns:
+        # - start in unknown db and don't have update
+        # - start in None and don't have fuzzed_ITEM
+        # - update_action is 'rejected'
+    mask1 = (seed['db'] == 'unknown') & (seed['update_action'].isnull())
+    mask2 = (seed['db'] == 'None') & (seed['fuzzed_ITEM'].isnull())
+    mask3 = (seed['update_action'] == 'rejected')
+    mask = mask1 | mask2 | mask3
+
+    df = seed.loc[mask, ['_item', 'accX']]
+    df = df.reset_index(drop=True).set_index('_item')
+    df['accY'] = 'unknown'
+    out['updated']['unknowns_db'] = tidy(df)
 
 
-    out_dfs['loaded']['cat_db'] = cat_db.copy()
+    # fuzzy:
+        # - start in fuzzy and no update
+        # - start in None but have fuzzed_ITEM and no update
+    mask1 = (seed['db'] == 'fuzzy') & (seed['update_action'].isnull())
+    mask2 = ((seed['db'] == 'None') & (~seed['fuzzed_ITEM'].isnull())
+                                    & (seed['update_action'].isnull()))
+    mask = mask1 | mask2
 
-    # DBS AFTER UPDATE
+    df = seed.loc[mask, ['_item', 'accX', 'accY']]
+    df = df.reset_index(drop=True).set_index('_item')
+    out['updated']['fuzzy_db'] = tidy(df)
 
-    # pattern:
-        # - do everything with dbs indexed by ('_item', 'accX') tuples
-        # - for each db to be changed:
-            # - get the tuples to be changed
-            # - get the new values (if adding or changing)
-            # - call a function which executes it
+    # cat_db:
+        # - start in known
+        # - update_action is 'confirmed'
+        # - have fuzzed_ITEM with no update_action
+    mask1 = (seed['db'] == 'known')
+    mask2 = (seed['update_action'] == 'confirmed')
+    mask3 = (~seed['fuzzed_ITEM'].isnull()) & (seed['update_action'].isnull())
+    mask = mask1 | mask2 | mask3
 
-    # first get all dbs indexed by ('_item', 'accX') tuples
-    by_tups = {}
-    for db in out_dfs['loaded']:
-        by_tups[db] = (out_dfs['loaded'][db].reset_index().copy()
-                                            .set_index(['_item', 'accX']))
+    df = seed.loc[mask, ['_item', 'accX', 'accY']]
+    df = df.reset_index(drop=True).set_index('_item')
+    out['updated']['cat_db'] = tidy(df) 
 
-    df_tup = df.reset_index().set_index(['_item', 'accX']) 
-    
-    # # unknowns:  where accY no longer == 'unknown':
-    # #         - remove from unknowns
-    # #         - add entry to cat_db, with new accY
-    # #         - change tx_db accY to new accY
+    # tx_db - all rows, accY as original, except:
+        # paths to known (accY is original):
+            # db=known
+            # fuzzed_ITEM and update != rejected
+            # update_action is not null, and not rejected
+    df = seed.copy()
 
-    # get the tuples (actually a multiindex) by intersection of indices
-    mask = (df_tup.index.isin(by_tups['unknowns_db'].index)
-         & ~df_tup['update_action'].isnull())
+    mask1 = (seed['db'] == 'known')
+    mask2 = ((~seed['fuzzed_ITEM'].isnull()) 
+                    & (seed['update_action'] !='rejected'))
+    mask3 = ((~seed['update_action'].isnull()) & 
+                    (seed['update_action'] !='rejected')) 
 
-    tuples_to_change = df_tup.loc[mask].index
+    mask = mask1 | mask2 | mask3
 
-    # add entry to cat_db - NB retrieve original accY (from before overwritten)
-    # (this retrieval simulates, in effect, the manual update of unknowns_db.
-    #  But unknowns_db here has NOT been updated)
-    new_vals = df_tup.loc[tuples_to_change, 'orig_accY']
-    cat_db = edit_db(cat_db, tuples_to_change, new_vals)
+    #simpler to turn it into unknowns
+    mask = ~mask
 
-    # remove from unknowns_db
-    unknowns_db = edit_db(unknowns_db, tuples_to_change)
+    df.loc[mask, 'accY'] = 'unknown'
+    df.loc[(df['db'] == 'None') &
+           (df['fuzzed_ITEM'].isnull()), 'accY'] = 'unknown'
+    df = df[['accX', 'accY', 'net_amt', 'ITEM', '_item']]
 
-    # change tx_db accY to new accY
-    tx_db = edit_db(tx_db, tuples_to_change, new_vals)
+    out['updated']['tx_db'] = df
 
-
-    # fuzzy, where status == 'reject'
-    mask = (df_tup.index.isin(by_tups['fuzzy_db'].index)
-            & (df_tup['update_action'] == 'reject'))
-
-    tuples_to_change = df_tup.loc[mask].index
-
-    #     - change tx_db accY to 'unknown'
-    tx_db = edit_db(tx_db, tuples_to_change, 'unknown')
-
-    #     - add entry to unknowns_db, with accY = 'unknown'
-    unknowns_db = edit_db(unknowns_db, tuples_to_change, 'unknown')
-
-    #     - remove from fuzzy_db
-    fuzzy_db = edit_db(fuzzy_db, tuples_to_change)
-
-
-    # fuzzy, where status == 'confirm'
-    mask = (df_tup.index.isin(by_tups['fuzzy_db'].index)
-            & (df_tup['update_action'] == 'confirm'))
-
-    tuples_to_change = df_tup.loc[mask].index
-
-    #     - add entry to cat_db, with accY of accY from fuzzy_db
-    new_vals = df_tup.loc[tuples_to_change, 'orig_accY']
-    cat_db = edit_db(cat_db, tuples_to_change, new_vals)
-
-    #     - remove from fuzzy_db
-    fuzzy_db = edit_db(fuzzy_db, tuples_to_change)
-
-    # fuzzy, where status == 'modified'
-    #     - xx
-
-
-    out_dfs['updated']['unknowns_db'] = unknowns_db   
-    out_dfs['updated']['cat_db'] = cat_db   
-    out_dfs['updated']['fuzzy_db'] = fuzzy_db   
-    out_dfs['updated']['tx_db'] = tx_db   
-
-
-    if append_df:
-        return out_dfs, df
-
-    return out_dfs
-
-
+    if return_seed:
+        return out, seed
+    else:
+        return out
 
 
 def edit_db(db, tuples_to_change, new_vals=None):
+    if isinstance(new_vals, str):
+        new_vals = [new_vals]
+
     orig_index = db.index.names
 
+    print('\ndb1\n', db)
+    print('\ntuples\n', tuple(tuples_to_change))
+    print('\nnew_vals\n', new_vals)
+
+    if orig_index != 'date':
+        db = deduple(db)
+
     db = db.reset_index().set_index(['_item', 'accX'])
+    print('\ndb2\n', db)
 
     if new_vals is None:
         db = db.drop(tuples_to_change)
@@ -223,7 +206,11 @@ def edit_db(db, tuples_to_change, new_vals=None):
         db.loc[tuples_to_change, 'accY'] = new_vals
 
     else:
-        appendee = pd.DataFrame({'accY': new_vals}, index=tuples_to_change) 
+        print('\ntuples to change\n', tuple(tuples_to_change))
+        print('\nlen(tuples)\n', len(tuples_to_change))
+        print('\nlen(new_vals)\n', len(new_vals))
+        print('\nnew_vals.values\n', new_vals.values)
+        appendee = pd.DataFrame({'accY': new_vals.orig_accY}, index=tuples_to_change) 
         db = db.append(appendee)
 
 
@@ -395,6 +382,7 @@ def initialise_project(proj_name, overwrite_existing=False, cat_db_to_import=Non
 
     # cat_db
     if cat_db_to_import is not None:
+        cat_db_to_import = os.path.join('..', cat_db_to_import)
         copyfile(cat_db_to_import, 'cat_db.csv')
         addlog(loglist, 'imported cat_db from' + cat_db_to_import)
 
@@ -488,3 +476,10 @@ def writelog(loglist, logpath=None):
 def addlog(loglist, logstring):
     loglist.append(tstamp() + logstring)
 
+
+def print_targets_dict(targets_dict, ind=None):
+    if ind is None: ind = ""
+    else: ind = str(ind)
+    
+    for s in targets_dict:
+        for db in targets_dict[s]: print(f'{s}/{db}')
