@@ -34,5 +34,5 @@ def get_freq(working_vars, i, _dbg=False):
         if _dbg: print(f'*** [1] writing {out} to {var} in row {i} *** ')
         return out
 
-    return None
+    return 1
 

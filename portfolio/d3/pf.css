@@ -1,0 +1,15 @@
+button {
+  background-color: Grey;
+  border: none;
+  color: white;
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 18px;
+  align: center;
+}
+
+.btn {
+  width: 60%;
+  margin:auto;
+}
+
