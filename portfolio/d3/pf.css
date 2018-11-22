@@ -1,15 +1,75 @@
+#container {
+  display: flex;
+}
+
+table {
+  overflow: auto;
+  max-height: 150px;
+}
+
+#table-container {
+  border-style: solid;
+  border-color: steelblue;
+  border-width: 1px;
+  height: 200px;
+  margin: 3px;
+}
+
+#table-heading {
+  max-width: 40px;
+  display: inline;
+}
+#input_table {
+  /* display: inline; */
+  display: flex;
+  align: top;
+  width: 150px;
+}
+
+.fund_row {
+  width: 40px;
+  display: inline;
+}
+
+#xinput {
+  width: 40px;
+}
+
+#chart1 {
+  /* display: inline; */
+  /* flex-grow: 1; */
+  border-style: solid;
+  border-color: steelblue;
+  border-width: 1px;
+  margin: 3px;
+  height: 200px;
+}
+
 button {
   background-color: Grey;
   border: none;
   color: white;
   text-align: center;
   font-family: Arial, sans-serif;
-  font-size: 18px;
+  font-size: 12px;
+  align: center;
+  border-radius: 3px;
+  margin: 3px;
+  width: 90%;
+}
+
+.remove-btn {
+  background-color: DarkRed;
+}
+
+.table-heading {
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  width: 40px;
   align: center;
 }
 
-.btn {
-  width: 60%;
-  margin:auto;
+td {
+  height: 30px;
 }
 
