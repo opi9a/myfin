@@ -103,9 +103,10 @@ function addFundRow() {
                 .text('x')
                 .attr('class', 'remove-btn');
 
-removeBtns = d3.selectAll('.remove-btn')
-removeBtns.on('click', function() { this.parentNode
-                                        .parentNode.remove() });
+    // think I have to repeat this now
+    removeBtns = d3.selectAll('.remove-btn')
+    removeBtns.on('click', function() { this.parentNode
+                                            .parentNode.remove() });
 };
 
 
@@ -157,7 +158,7 @@ function update() {
     .transition().duration(dur)
           .style("fill", function(d, i) {
               if (Object.keys(colors).includes(d.key)) { return colors[d.key]; }
-              else { return 'steelblue'; };
+              else { return 'gray'; };
           })
               
           .attr("height", d => svgHeight - yScale(d.value) - margin.bottom)
@@ -171,8 +172,9 @@ function update() {
             .transition()
             .duration(dur)
             .attr("fill-opacity", 0)
-            .attr("x", svgWidth - xScale.bandwidth() / 2)
-            .attr("y", svgHeight - margin.bottom)
+            // .attr("x", svgWidth - xScale.bandwidth() / 2)
+            .attr("y", margin.top)
+            .transition()
             .attr("height", 0)
             // .attr("width", 0)
             .remove();
@@ -183,12 +185,14 @@ function update() {
 
     labels.enter().append('text')
         .attr('class', 'barLabels')
+        .attr("fill-opacity", 0)
         .attr("x", svgWidth)
         .attr("y", svgHeight - margin.bottom)
 
     // merge with update selection and transition all labels to right place
         .merge(labels)
         .transition().duration(dur)
+          .attr("fill-opacity", 1)
           .attr("x", d => xScale(d.key)
                           + margin.left + (xScale.bandwidth() / 2))
 
@@ -215,14 +219,13 @@ function update() {
 
     // exit old labels to left
     labels.exit()
-        .attr("fill-opacity", 1)
             .transition()
             .duration(dur)
             .attr("fill-opacity", 0)
-            .attr("x", svgWidth)
-            .attr("y", svgHeight - margin.bottom)
-            .attr("height", 0)
-            .attr("width", 0)
+            // .attr("x", svgWidth)
+            // .attr("y", svgHeight - margin.bottom)
+            // .attr("height", 0)
+            // .attr("width", 0)
             .remove();
 
     // update axes
