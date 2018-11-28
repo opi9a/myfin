@@ -58,8 +58,20 @@ function initByAsset() {
                                  + "," + byAsset.svgHeight/2 +")");
 
     byAsset['arc'] = d3.arc()
-                        .outerRadius(byAsset.radius - 30)
-                        .innerRadius(5);
+                        .outerRadius(byAsset.radius - 15)
+                        .innerRadius(30);
+
+    var pie = d3.pie();
+
+    var g = byAsset.svg.selectAll("arc")
+                .data(pie([1]))
+                .enter()
+                .append("g")
+                .attr("class", "arc")
+                .attr("fill", "lightgrey");
+
+    g.append("path")
+        .attr("d", byAsset.arc)
 
     return byAsset;
 
@@ -68,8 +80,16 @@ function initByAsset() {
 function updateAssetChart(portfolioDistribution, chartObj) {
     console.log('updating asset chart');
 
+    // cannot get updating to work, except by actually removing prev
+    // - problem seems to be in making the selection.  It grows each time, 
+    // i.e. the enter selection is always 3 (shd by 0 apart from first update)
+    d3.select('#chart2').selectAll('path').remove();
+
     let svg = chartObj.svg;
     let arc = chartObj.arc;
+    let svgHeight = chartObj.svgHeight;
+    let svgWidth = chartObj.svgWidth;
+    let radius = chartObj.radius;
 
     var pieData = [];
     Object.keys(portfolioDistribution.assets).forEach( a => {
@@ -83,14 +103,19 @@ function updateAssetChart(portfolioDistribution, chartObj) {
 
     var pie = d3.pie()
         .value(function(d) { return d.value; })(pieData);
+    
 
     var g = svg.selectAll("arc")
-                .data(pie, d => d.data.asset)
-                .enter()
+                .data(pie, d => d.data.asset);
+
+    console.log('g', g);
+
+    var h = g.enter()
                 .append("g")
                 .attr("class", "arc");
 
-    g.append("path")
+    console.log('h', h);
+    h.append("path")
         .attr("d", arc)
         .transition()
         .duration(dur)
@@ -100,6 +125,34 @@ function updateAssetChart(portfolioDistribution, chartObj) {
                 return 0.5
             } else { return 0.85 };
         });
+
+    h.on('mouseover', function(d) { 
+        var mData = d;
+        console.log("mData", mData);
+        svg.append('text')
+            .attr("class", "tooltip")
+            .attr("x", 0)
+            .attr("y", 0)
+            .attr("text-anchor", "middle")
+            // .text("heye")
+            .text( function(d) { return mData.data.asset;} )
+            .attr("fill-opacity", 0).transition().duration(300)
+            .attr("fill-opacity", 1);
+        svg.append('text')
+            .attr("class", "tooltip")
+            .attr("x", 0)
+            .attr("y", 15)
+            .attr("text-anchor", "middle")
+            // .text("heye")
+            .text( function(d) { return f(mData.data.value);} )
+            .attr("fill-opacity", 0).transition().duration(300)
+            .attr("fill-opacity", 1);
+    });
+
+    h.on('mouseout', function() {
+        d3.selectAll('.tooltip')
+            .transition().duration(200).remove();
+    });
 
     return pieData;
 
@@ -583,7 +636,6 @@ function parseInputTable(byPercent = true) {
 
     if (byPercent) {
         divisor = portfolioSum / 100;
-        console.log('out obj to divide', clone(out));
 
         Object.keys(out).forEach(x => out[x] /= divisor );
     };
