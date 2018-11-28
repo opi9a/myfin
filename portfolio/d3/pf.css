@@ -1,5 +1,54 @@
-#container {
-  display: flex;
+* {
+  box-sizing: border-box;    
+}
+
+.container {
+}
+
+#outer {
+  border-style: solid;
+  border-color: steelblue;
+  border-radius: 5px;
+  border-width: 2px;
+  padding: 5px;
+  height: 300px;
+  width: 740px;
+}
+
+
+#table-container {
+  float: left;
+  height: 100%;
+  width: 20%;
+}
+
+#chart-container {
+  float: left;
+  height: 100%;
+  width: 80%;
+}
+
+#chart1 {
+  height: 50%;
+}
+
+#lower-row {
+  float: bottom;
+  width: 100%;
+  height: 50%;
+}
+
+.small-chart {
+  float: left;
+  height: 100%;
+}
+
+#chart2 {
+  width: 30%;
+}
+
+#chart3 {
+  width: 70%;
 }
 
 table {
@@ -7,47 +56,29 @@ table {
   max-height: 250px;
 }
 
-.barLabels {
-  font-size: 5;
-}
-
-#table-container {
-  border-style: solid;
-  border-color: steelblue;
-  border-width: 1px;
-  height: 300px;
-  margin: 3px;
-}
-
-#table-heading {
-  max-width: 40px;
-  display: inline;
-}
 #input_table {
   /* display: inline; */
   display: flex;
   align: top;
-  width: 150px;
+}
+
+#table-heading {
+  max-width: 30px;
+  display: inline;
+  font-size: 10px;
+}
+
+.barLabels {
+  font-size: 8px;
 }
 
 .fund_row {
   width: 40px;
   display: inline;
-  font-size: 10px;
 }
 
 #xinput {
   width: 40px;
-}
-
-#chart1 {
-  /* display: inline; */
-  /* flex-grow: 1; */
-  border-style: solid;
-  border-color: steelblue;
-  border-width: 1px;
-  margin: 3px;
-  height: 300px;
 }
 
 button {
@@ -56,20 +87,21 @@ button {
   color: white;
   text-align: center;
   font-family: Arial, sans-serif;
-  font-size: 12px;
   align: center;
   border-radius: 3px;
   margin: 3px;
   width: 90%;
+  font-size: 10px;
 }
 
 .remove-btn {
+  font-size: 7px;
   background-color: DarkRed;
 }
 
 .table-heading {
   font-family: Arial, sans-serif;
-  font-size: 12px;
+  font-size: 10px;
   width: 40px;
   align: center;
 }
@@ -78,3 +110,18 @@ td {
   height: 30px;
 }
 
+.xAxis {
+  font-size: 8px;
+}
+
+.yAxis {
+  font-size: 8px;
+}
+
+
+.tooltip {
+  font-family: sans-serif;
+  font-size: 10px;
+  font-weight: bold;
+  font-color: DarkGrey;
+}

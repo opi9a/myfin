@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<meta charset="UTF-8"> 
+<head>
+  <link rel="stylesheet" href="pf.css">
+</head>
+<body>
+  <div class='container' id='outer'>
+    <div class='container' id='table-container'>
+      <button id='addRow-btn'>add row</button>
+      <table id='input_table'>
+        <tr>
+          <th class='table-heading'>Fund</th>
+          <th class='table-heading'>Amount</th>
+        </tr>
+
+        <tr>
+          <td><input type="text" value="VFEM" class="fund_row fundName"></td>
+          <td><input type="number" value="10" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="AGBP" class="fund_row fundName"></td>
+          <td><input type="number" value="25" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="H50E" class="fund_row fundName"></td>
+          <td><input type="number" value="35" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="IGLN" class="fund_row fundName"></td>
+          <td><input type="number" value="15" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="PHAU" class="fund_row fundName"></td>
+          <td><input type="number" value="2" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="XDJP" class="fund_row fundName"></td>
+          <td><input type="number" value="15" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="XDUS" class="fund_row fundName"></td>
+          <td><input type="number" value="10" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+        <tr>
+          <td><input type="text" value="EMIM" class="fund_row fundName"></td>
+          <td><input type="number" value="10" class="fund_row fundAmt"></td>
+          <td><button class="remove-btn">x</button></td>
+        </tr>
+
+      </table>
+      <button id='update-btn'>update</button>
+    </div>
+    <div class='container' id='chart-container'>
+      <div id='chart1'></div>
+      <div class='container' id='lower-row'>
+        <div id='chart2' class='container small-chart'></div>
+        <div id='chart3' class='container small-chart'></div>
+      </div>
+    </div>
+  </div>
+
+<body>
+<!-- <script src="https://d3js.org/d3.v5.min.js"></script> -->
+<script src="d3.min.js"></script>
+<script src="pfStack.js"></script>
+<script src="funds.js"></script>
+<script src="zone_map.json"></script>
+</body>
+
+
+</html>
+
