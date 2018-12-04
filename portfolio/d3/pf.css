@@ -101,6 +101,7 @@ table {
 
 button {
   background-color: grey;
+  cursor: pointer;
   border: none;
   color: white;
   text-align: center;
@@ -131,6 +132,12 @@ button {
 
 td {
   height: 25px;
+}
+
+.chart-title {
+  font-family: Arial, sans-serif;
+  font-size: 14;
+  fill: steelBlue;
 }
 
 .xAxis {
@@ -169,4 +176,8 @@ input {
 .fundAmt {
   width: 30px;
   text-align: right;
+}
+
+.zone-info {
+  height: 20;
 }

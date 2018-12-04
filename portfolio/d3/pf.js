@@ -5,7 +5,8 @@ var dur = 1500
     minBarH = 15
     maxColumns = 14;
 
-var colors = makeColors()
+var colors = makeColors(),
+    zoneLookup = makeZoneLookup()
 
 // unless declare these globally, they aren't updated in the mousovers (??)
 var countryData, zoneData;
@@ -32,22 +33,23 @@ var byAsset = initByAsset();
 var byCountry = initByCountry();
 var byZone = initByZone();
 
-// Get the initial portfolio
+// Get the initial portfolio and make charts
 var portfolio = parseInputTable(mode);
+    update(portfolio, 'Whole portfolio');
 
 
 // ACTIONS
 
 updateBtn.on('click', function() {
     portfolio = parseInputTable(mode);
-    update(portfolio) } );
+    update(portfolio, 'Whole portfolio') } );
 
 modeBtn.on("change", function() { 
 	if (mode == 'percent') { mode = 'actual' }
 	else { mode = 'percent' };
 	console.log('new mode', mode);
     portfolio = parseInputTable(mode);
-	update(portfolio, modeChange=true);
+	update(portfolio, false, modeChange=true);
 });
 
 var infoBtnActive = 'none';
@@ -56,13 +58,16 @@ infoBtns.on("click", function() {
 
     if (infoBtnActive == fundName) {
         infoBtnActive = 'none';
-        update(portfolio);
+        update(portfolio, 'Whole portfolio');
         return;
     };
     infoBtnActive = fundName;
-    let singlePortfolio = { [fundName]: portfolio[fundName] };
+    let singlePortfolio = { [fundName]: 100 };
+    if (mode !== 'percent') {
+        singlePortfolio[fundName] = portfolio[fundName] };
+
     console.log('calling update for', singlePortfolio);
-    update(singlePortfolio);
+    update(singlePortfolio, fundName + " fund only");
 });
 
 
@@ -71,7 +76,7 @@ infoBtns.on("click", function() {
 
 // FUNCTION DEFINITIONS
 
-function update(portfolio, modeChange=false) {
+function update(portfolio, dataSource, modeChange=false) {
     portfolioDistributions = getPortfolioDistribution(portfolio, funds);
     assetKeys = Object.keys(portfolioDistributions.assets);
 
@@ -80,20 +85,20 @@ function update(portfolio, modeChange=false) {
 
     countryData = orderCountries(portfolioDistributions.countries, maxColumns);
 
-    updateCountryChart(countryData, byCountry);
+    updateCountryChart(countryData, byCountry, dataSource);
 
-    updateZoneChart(portfolioDistributions.zones, byZone);
+    updateZoneChart(portfolioDistributions.zones, byZone, dataSource);
 };
 
 function initByAsset() {
     console.log('initializing asset chart');
 
     var byAsset = {
-        svgHeight: 150,
-        svgWidth: 200,
+        svgHeight: 170,
+        svgWidth: 170,
     }
 
-    byAsset.radius = Math.min(byAsset.svgHeight, byAsset.svgWidth) / 2;
+    byAsset.radius = (Math.min(byAsset.svgHeight, byAsset.svgWidth) - 20) / 2;
 
 
     byAsset['svg'] = d3.select("#chart2").append("svg")
@@ -102,11 +107,16 @@ function initByAsset() {
              .append("g")
                  .attr("transform",
                        "translate(" + byAsset.svgWidth/2
-                                 + "," + byAsset.svgHeight/2 +")");
+                                 + "," + (byAsset.svgHeight/2 + 15) +")");
 
     byAsset['arc'] = d3.arc()
                         .outerRadius(byAsset.radius - 15)
                         .innerRadius(30);
+
+    byAsset['svg'].append("text")
+                    .attr("class", "chart-title")
+                    .attr("transform", "translate(-20, -80)")
+                    .text("Assets");
 
     var pie = d3.pie();
 
@@ -208,7 +218,7 @@ function initByZone() {
     byZone = {
         svgHeight: 190,
         svgWidth: 314,
-        margin: {"top": 15, "bottom": 30, "left": 45, "right":5},
+        margin: {"top": 55, "bottom": 30, "left": 45, "right":5},
     };
 
     byZone.chartWidth = byZone.svgWidth
@@ -253,6 +263,11 @@ function initByZone() {
         .attr('transform', 'translate(' + (byZone.margin.left - 1) + ', 0)')
         .call(byZone.yAxis);
 
+    byZone.svg.append('text')
+        .attr("class", "chart-title")
+        .attr("transform", "translate(70, 20)")
+        .text("Zones")
+
     return byZone;
 };
 
@@ -262,9 +277,9 @@ function initByCountry() {
 // Initializes the country chart
 
     byCountry = {
-        svgHeight: 150,
+        svgHeight: 180,
         svgWidth: 465,
-        margin: {"top": 15, "bottom": 20, "left": 45, "right":5},
+        margin: {"top": 35, "bottom": 20, "left": 45, "right":5},
     };
 
     byCountry.chartWidth = byCountry.svgWidth
@@ -309,12 +324,17 @@ function initByCountry() {
         .attr('transform', 'translate(' + (byCountry.margin.left - 1) + ', 0)')
         .call(byCountry.yAxis);
 
+    byCountry.svg.append('text')
+        .attr("class", "chart-title")
+        .attr("transform", "translate(70, 20)")
+        .text("Countries")
+
     return byCountry;
 };
 
 
 // main function for drawing and redrawing chart
-function updateZoneChart(xzones, chartObj) {
+function updateZoneChart(xzones, chartObj, dataSource) {
 
     console.log('xzones0', xzones);
 
@@ -327,11 +347,18 @@ function updateZoneChart(xzones, chartObj) {
     var xAxis = chartObj.xAxis;
     var yAxis = chartObj.yAxis;
 
+    if (dataSource) {
+        svg.select("text.data-source").remove();
+        svg.select("text.data-source").remove()
+        svg.append("text")
+            .attr("class", "chart-title data-source")
+            .attr("transform", "translate(120, 20)")
+            .attr("font-style", "italic")
+            .text(dataSource);
+    };
+
     var newData = flatten(xzones, 'zone');
     console.log('newData', newData);
-    // this assignment is useful just to mirror the country function,
-    // which has the extra step of generating a trimmed portfolio, called
-    // countryData
 
     // update scale domains
     xScale.domain(newData.map(a => a.zone));
@@ -353,27 +380,29 @@ function updateZoneChart(xzones, chartObj) {
 
     console.log('xzones1', clone(xzones));
 
-    infoBtns = svg.selectAll("g.zone-info").data(newData, d => d.zone);
+    var infoBtns = svg.selectAll("g.zone-info")
+            .data(newData, d => d.zone)
+            .enter().append("g")
+                .attr("class", "zone-info");
 
-    infoBtnsG = infoBtns.enter().append("g")
-                .attr("class", "zone-info")
-
-    infoBtnsG.append("rect")
+    infoBtns.append("rect")
             .attr("x", d => xScale(d.zone) + margin.left + 2)
             .attr("y", svgHeight - 10)
+            .transition("infoBtns-zone").delay(dur).duration(dur)
             .attr("width", xScale.bandwidth() - 4)
             .attr("height", 20)
             .attr("fill", "green");
 
-    infoBtnsG.append("text")
+    infoBtns.append("text")
             .text("i") 
             .attr("x", d => xScale(d.zone) + margin.left + xScale.bandwidth()/2)
             .attr("y", svgHeight - 2)
             .attr("font-size", 9)
             .attr("font-family", "sans-serif")
+            .attr("cursor", "pointer")
             .attr("fill", "white");
 
-    infoBtnsG.on("click", function(d) {
+    infoBtns.on("click", function(d) {
 
                 let zoneName = d.zone;
 
@@ -402,9 +431,22 @@ function updateZoneChart(xzones, chartObj) {
                 // console.log('keys', Object.keys(clone(zoneCountries)));
                 // console.log('portf', clone(zoneCountries));
                 // get them ordered
-                orderedZoneCountries = orderCountries(zoneCountries, maxColumns);
+                let orderedZoneCountries = orderCountries(zoneCountries, maxColumns);
+                if (mode == 'percent') {
+                    let zoneSum = sumObj(portfolioDistributions.zones[d.zone]);
+                    console.log('percenting zones', orderedZoneCountries);
+                    let perZoneCountries = {};
+                    for (country in orderedZoneCountries) {
+                        perZoneCountries[country] = {};
+                        for (asset in orderedZoneCountries[country]) {
+                            perZoneCountries[country][asset]
+                                = orderedZoneCountries[country][asset] * 100 / zoneSum;
+                        };
+                    };
+                    orderedZoneCountries = perZoneCountries;
+                };
                 // update the chart
-                updateCountryChart(orderedZoneCountries, byCountry);
+                updateCountryChart(orderedZoneCountries, byCountry, zoneLookup[d.zone] + " zone");
     });
     
 
@@ -538,7 +580,7 @@ function updateZoneChart(xzones, chartObj) {
 
 
 // main function for drawing and redrawing chart
-function updateCountryChart(countryData, chartObj) {
+function updateCountryChart(countryData, chartObj, dataSource) {
 
     var svgWidth = chartObj.svgWidth;
     var svgHeight = chartObj.svgHeight;
@@ -548,6 +590,19 @@ function updateCountryChart(countryData, chartObj) {
     var yScale = chartObj.yScale;
     var xAxis = chartObj.xAxis;
     var yAxis = chartObj.yAxis;
+
+    if (dataSource) {
+        svg.select("text.data-source").remove();
+
+        svg.append("text")
+            .attr("class", "chart-title data-source")
+            .attr("transform", "translate(170, 20)")
+            .attr("font-style", "italic")
+            .text("")
+            .transition("country title in")
+            .duration(dur)
+            .text(dataSource);
+    };
 
     var newData = flatten(countryData, 'country');
 
@@ -968,6 +1023,25 @@ function makeColors() {
     colors['gold'] = 'gold';
 
     return colors;
+};
+
+
+function makeZoneLookup() {
+
+    zoneLookup = {};
+
+    zoneLookup['uk'] = 'UK';
+    zoneLookup['na'] = 'North America';
+    zoneLookup['cn'] = 'China';
+    zoneLookup['nn'] = 'Not National';
+    zoneLookup['eu'] = 'EU';
+    zoneLookup['la'] = 'Latin America';
+    zoneLookup['as'] = 'Asia excl China';
+    zoneLookup['em'] = 'Emerging markets';
+    zoneLookup['pc'] = 'Petro economies';
+
+    return zoneLookup;
+
 };
 
 
