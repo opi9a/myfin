@@ -1,187 +1,490 @@
-// set up canvas variables
-var svgHeight = 300
-    svgWidth = 400
-    margin = {"top": 15, "bottom": 25, "left": 45, "right":5}
-    chartWidth = svgWidth - (margin.left + margin.right)
-    chartHeight = svgHeight - (margin.top + margin.bottom)
-    dur = 2000
+var tempX;
+// general variables
+var dur = 1500
+    f = d3.format(".1f")
+    minBarH = 15
+    maxColumns = 14;
 
-// set up data variables
-var data1 = []
-    rand_max = 9
-    country_list = ['USA', 'FRA', 'DEU',
-                    'JPN', 'ITA', 'CAN', 'CHN',
-                    'ESP', 'NLD', 'KOR', 'TWN', 'IND', 'BRA']
-    colors = {}
+var colors = makeColors()
 
-    for (var i=0; i<country_list.length; i++) {
-        colors[country_list[i]] = d3.schemeCategory20[i];
-    }
-    
-    colors['NoN'] = 'gold';
-    colors['GBR'] = 'darkRed';
+// unless declare these globally, they aren't updated in the mousovers (??)
+var countryData, zoneData;
 
+// set up input table and buttons
+var inputTable = d3.select('#input_table tbody')
+var inputRows = d3.selectAll('.fundAmt')
 
-// svg, scales, empty axes and button
-var svg = d3.select("#chart1").append("svg")
-          .attr("width", svgWidth)
-          .attr("height", svgHeight)
+var addRowBtn = d3.select('#addRow-btn')
+              .on("click", function() { addFundRow() });
 
-yScale = d3.scaleLinear()
-            .domain([0, 100])
-            .range([svgHeight - margin.bottom, margin.top])
+var updateBtn = d3.select('#update-btn')
 
-xScale = d3.scaleBand()
-            .range([0, chartWidth])
-            .align(0)
-            .padding(0.05)
+var removeBtns = d3.selectAll('.remove-btn')
+                   .on('click', function() { this.parentNode
+                                                 .parentNode.remove() });
+var infoBtns = d3.selectAll('.info-btn');
 
-yAxis = d3.axisLeft().scale(yScale)
-            .ticks(6)
+var modeBtn = d3.selectAll('input[name="mode"]')
+var mode = 'percent'
 
-xAxis = d3.axisBottom().scale(xScale)
-            .tickSize(0)
+// initialize country chart
+var byAsset = initByAsset();
+var byCountry = initByCountry();
+var byZone = initByZone();
 
-svg.append('g')
-    .attr('class', 'xAxis')
-    .attr('transform', 'translate(' + (margin.left) + ', '
-                                    + (chartHeight + margin.top) + ')')
-    .call(xAxis)
-        .selectAll('text')
-        .attr('transform', 'translate(0, 5)')
-
-svg.append('g')
-    .attr('class', 'yAxis')
-    .attr('transform', 'translate(' + (margin.left - 1) + ', 0)')
-    .call(yAxis)
+// Get the initial portfolio
+var portfolio = parseInputTable(mode);
 
 
-inputTable = d3.select('#input_table tbody')
-inputRows = d3.selectAll('.fundAmt')
+// ACTIONS
 
-addRowBtn = d3.select('#addRow-btn')
-addRowBtn.on("click", function() { addFundRow() });
-
-updateBtn = d3.select('#update-btn')
-
-
-// inputTable.on("change", function() {
 updateBtn.on('click', function() {
-    console.log('changed table');
-    portfolio = parseInputTable();
-    data1 = get_portfolio_distribution(portfolio, funds);
-    update();
+    portfolio = parseInputTable(mode);
+    update(portfolio) } );
+
+modeBtn.on("change", function() { 
+	if (mode == 'percent') { mode = 'actual' }
+	else { mode = 'percent' };
+	console.log('new mode', mode);
+    portfolio = parseInputTable(mode);
+	update(portfolio, modeChange=true);
 });
 
-var removeBtns
+var infoBtnActive = 'none';
+infoBtns.on("click", function() {
+    let fundName = d3.select(this).attr("data-fund");
 
-// moved these from addFundRow - need to have a row already I think
-// is ok now as a couple are hardcoded in html, but watch out
-removeBtns = d3.selectAll('.remove-btn')
-removeBtns.on('click', function() { this.parentNode
-                                        .parentNode.remove() });
+    if (infoBtnActive == fundName) {
+        infoBtnActive = 'none';
+        update(portfolio);
+        return;
+    };
+    infoBtnActive = fundName;
+    let singlePortfolio = { [fundName]: portfolio[fundName] };
+    console.log('calling update for', singlePortfolio);
+    update(singlePortfolio);
+});
 
-function removeRow(input) {
-    input.remove();
-}
+
+// inputTable.on("change", function() { console.log('changed table'); })
+
 
 // FUNCTION DEFINITIONS
 
-function addFundRow() {
-    fundRow = inputTable.append('tr');
-    fundRow.append('td').append('input')
-                .attr('type', 'text')
-                .attr('value', '?')
-                .attr('class', 'fund_row fundName');
+function update(portfolio, modeChange=false) {
+    portfolioDistributions = getPortfolioDistribution(portfolio, funds);
+    assetKeys = Object.keys(portfolioDistributions.assets);
 
-    fundRow.append('td').append('input')
-                .attr('type', 'number')
-                .attr('value', 0)
-                .attr('class', 'fund_row fundAmt');
+	if (modeChange == false) {
+		updateAssetChart(portfolioDistributions, byAsset) };
 
-    fundRow.append('td').append('button')
-                .text('x')
-                .attr('class', 'remove-btn');
+    countryData = orderCountries(portfolioDistributions.countries, maxColumns);
 
-    // think I have to repeat this now
-    removeBtns = d3.selectAll('.remove-btn')
-    removeBtns.on('click', function() { this.parentNode
-                                            .parentNode.remove() });
+    updateCountryChart(countryData, byCountry);
+
+    updateZoneChart(portfolioDistributions.zones, byZone);
+};
+
+function initByAsset() {
+    console.log('initializing asset chart');
+
+    var byAsset = {
+        svgHeight: 150,
+        svgWidth: 200,
+    }
+
+    byAsset.radius = Math.min(byAsset.svgHeight, byAsset.svgWidth) / 2;
+
+
+    byAsset['svg'] = d3.select("#chart2").append("svg")
+           .attr("width", byAsset.svgWidth)
+           .attr("height", byAsset.svgHeight)
+             .append("g")
+                 .attr("transform",
+                       "translate(" + byAsset.svgWidth/2
+                                 + "," + byAsset.svgHeight/2 +")");
+
+    byAsset['arc'] = d3.arc()
+                        .outerRadius(byAsset.radius - 15)
+                        .innerRadius(30);
+
+    var pie = d3.pie();
+
+    var g = byAsset.svg.selectAll("arc")
+                .data(pie([1]))
+                .enter()
+                .append("g")
+                .attr("class", "arc")
+                .attr("fill", "lightgrey");
+
+    g.append("path")
+        .attr("d", byAsset.arc)
+
+    return byAsset;
+
+};
+
+function updateAssetChart(portfolioDistributions, chartObj) {
+    console.log('updating asset chart');
+
+    // cannot get updating to work, except by actually removing prev
+    // - problem seems to be in making the selection.  It grows each time, 
+    // i.e. the enter selection is always 3 (shd by 0 apart from first update)
+    d3.select('#chart2').selectAll('path').remove();
+
+    let svg = chartObj.svg;
+    let arc = chartObj.arc;
+    let svgHeight = chartObj.svgHeight;
+    let svgWidth = chartObj.svgWidth;
+    let radius = chartObj.radius;
+
+    var pieData = [];
+    Object.keys(portfolioDistributions.assets).forEach( a => {
+        if (a != 'countrySum') {
+            // pieData.push(a);
+            let row = {asset: a, value: portfolioDistributions.assets[a]};
+            pieData.push(row);
+        };
+    });
+
+    var pie = d3.pie()
+        .value(function(d) { return d.value; })(pieData);
+    
+
+    var g = svg.selectAll("arc")
+                .data(pie, d => d.data.asset);
+
+
+    var h = g.enter()
+                .append("g")
+                .attr("class", "arc");
+
+    h.append("path")
+        .attr("d", arc)
+        .transition()
+        .duration(dur)
+        .style("fill", d => colors[d.data.asset])
+        .style("fill-opacity", d => {
+            if (d.data.asset == 'bond') {
+                return 0.5;
+            } else { return 0.85; };
+        });
+
+
+    h.on('mouseover', function(d) { 
+        var mData = d;
+        svg.append('text')
+            .attr("class", "tooltip")
+            .attr("x", -1)
+            .attr("y", -5)
+            .attr("text-anchor", "middle")
+            .text( function(d) { return mData.data.asset;} )
+            .attr("fill-opacity", 0).transition().delay(200).duration(500)
+            .attr("fill-opacity", 1);
+        svg.append('text')
+            .attr("class", "tooltip")
+            .attr("x", 0)
+            .attr("y", 10)
+            .attr("text-anchor", "middle")
+            // .text("heye")
+            .text( function(d) { return f(mData.data.value) + "%";} )
+            .attr("fill-opacity", 0).transition().delay(200).duration(500)
+            .attr("fill-opacity", 1);
+    });
+
+    h.on('mouseout', function() {
+        d3.selectAll('.tooltip')
+            .transition().duration(200).remove();
+    });
+
+    return pieData;
+
+    
+};
+
+function initByZone() {
+// Initializes the zone chart
+
+    byZone = {
+        svgHeight: 190,
+        svgWidth: 314,
+        margin: {"top": 15, "bottom": 30, "left": 45, "right":5},
+    };
+
+    byZone.chartWidth = byZone.svgWidth
+        - (byZone.margin.left + byZone.margin.right);
+    byZone.chartHeight = byZone.svgHeight
+        - (byZone.margin.top + byZone.margin.bottom);
+
+
+    // svg, scales, empty axes and button
+    byZone['svg'] = d3.select("#chart3").append("svg")
+              .attr("width", byZone.svgWidth)
+              .attr("height", byZone.svgHeight)
+
+    byZone['yScale'] = d3.scaleLinear()
+                .domain([0, 100])
+                .range([byZone.svgHeight - byZone.margin.bottom,
+                        byZone.margin.top])
+
+    byZone['xScale'] = d3.scaleBand()
+                .range([0, byZone.chartWidth])
+                .align(0)
+                .padding(0.05)
+
+    byZone['yAxis'] = d3.axisLeft().scale(byZone.yScale)
+                .ticks(6)
+                .tickSizeOuter(0)
+
+    byZone['xAxis'] = d3.axisBottom().scale(byZone.xScale)
+                .tickSize(0)
+
+    byZone.svg.append('g')
+        .attr('class', 'xAxis byZone')
+        .attr('transform', 'translate(' + (byZone.margin.left) + ', '
+                                        + (byZone.chartHeight
+                                            + byZone.margin.top) + ')')
+        .call(byZone.xAxis)
+            .selectAll('text')
+            .attr('transform', 'translate(0, 5)')
+
+    byZone.svg.append('g')
+        .attr('class', 'yAxis byZone')
+        .attr('transform', 'translate(' + (byZone.margin.left - 1) + ', 0)')
+        .call(byZone.yAxis);
+
+    return byZone;
 };
 
 
-function parseInputTable() {
-    var fundSet = Object.keys(funds);
-    var out = {};
-    var names = document.getElementsByClassName('fundName');
-    var amts = document.getElementsByClassName('fundAmt');
-    console.log('names', names);
-    console.log('amts', amts);
 
-    for (var i=0; i<names.length; i++) {
-        name = names[i].value.toUpperCase();
-        amt = amts[i].value;
+function initByCountry() {
+// Initializes the country chart
 
-        if (fundSet.includes(name)) {
-          console.log(name, 'is in fundset')
-          out[name] = amt;
-        }
-        
-        else { alert(name + ' is not in set of funds - ignoring it'); }
+    byCountry = {
+        svgHeight: 150,
+        svgWidth: 465,
+        margin: {"top": 15, "bottom": 20, "left": 45, "right":5},
     };
 
-    return out;
-}
+    byCountry.chartWidth = byCountry.svgWidth
+        - (byCountry.margin.left + byCountry.margin.right);
+    byCountry.chartHeight = byCountry.svgHeight
+        - (byCountry.margin.top + byCountry.margin.bottom);
+
+
+    // svg, scales, empty axes and button
+    byCountry['svg'] = d3.select("#chart1").append("svg")
+              .attr("width", byCountry.svgWidth)
+              .attr("height", byCountry.svgHeight)
+
+    byCountry['yScale'] = d3.scaleLinear()
+                .domain([0, 100])
+                .range([byCountry.svgHeight - byCountry.margin.bottom,
+                        byCountry.margin.top])
+
+    byCountry['xScale'] = d3.scaleBand()
+                .range([0, byCountry.chartWidth])
+                .align(0)
+                .padding(0.05)
+
+    byCountry['yAxis'] = d3.axisLeft().scale(byCountry.yScale)
+                .ticks(6)
+                .tickSizeOuter(0)
+
+    byCountry['xAxis'] = d3.axisBottom().scale(byCountry.xScale)
+                .tickSize(0)
+
+    byCountry.svg.append('g')
+        .attr('class', 'xAxis')
+        .attr('transform', 'translate(' + (byCountry.margin.left) + ', '
+                                        + (byCountry.chartHeight
+                                            + byCountry.margin.top) + ')')
+        .call(byCountry.xAxis)
+            .selectAll('text')
+            .attr('transform', 'translate(0, 5)')
+
+    byCountry.svg.append('g')
+        .attr('class', 'yAxis')
+        .attr('transform', 'translate(' + (byCountry.margin.left - 1) + ', 0)')
+        .call(byCountry.yAxis);
+
+    return byCountry;
+};
 
 
 // main function for drawing and redrawing chart
-function update() {
+function updateZoneChart(xzones, chartObj) {
+
+    console.log('xzones0', xzones);
+
+    var svgWidth = chartObj.svgWidth;
+    var svgHeight = chartObj.svgHeight;
+    var margin = chartObj.margin;
+    var svg = chartObj.svg;
+    var xScale = chartObj.xScale;
+    var yScale = chartObj.yScale;
+    var xAxis = chartObj.xAxis;
+    var yAxis = chartObj.yAxis;
+
+    var newData = flatten(xzones, 'zone');
+    console.log('newData', newData);
+    // this assignment is useful just to mirror the country function,
+    // which has the extra step of generating a trimmed portfolio, called
+    // countryData
 
     // update scale domains
-    xScale.domain(data1.map(a => a.key));
-    yScale.domain([0, d3.max(data1, d => Number(d.value))]);
+    xScale.domain(newData.map(a => a.zone));
+    yScale.domain([0, d3.max(newData, d => Number(d.end))]);
     
     // rebind data
-    console.log(data1);
-    var bars = svg.selectAll("rect").data(data1, d => d.key )
+    var bars = svg.selectAll("rect").data(newData, d => (d.zone
+                                                         + d.type));
     
     // get enter bar selection - situate at right end, zero size
-    bars.enter()
+    var newBars = bars.enter()
             .append("rect")
             .attr("class", "bar")
+            .attr("class", d => d.type)
+            .each(function(d) { d3.select(this).classed(d.zone, true) } )
             .attr("x", svgWidth)
             .attr("y", svgHeight - margin.bottom)
-            .attr("width", xScale.bandwidth())
+            .attr("width", xScale.bandwidth());
+
+    console.log('xzones1', clone(xzones));
+
+    infoBtns = svg.selectAll("g.zone-info").data(newData, d => d.zone);
+
+    infoBtnsG = infoBtns.enter().append("g")
+                .attr("class", "zone-info")
+
+    infoBtnsG.append("rect")
+            .attr("x", d => xScale(d.zone) + margin.left + 2)
+            .attr("y", svgHeight - 10)
+            .attr("width", xScale.bandwidth() - 4)
+            .attr("height", 20)
+            .attr("fill", "green");
+
+    infoBtnsG.append("text")
+            .text("i") 
+            .attr("x", d => xScale(d.zone) + margin.left + xScale.bandwidth()/2)
+            .attr("y", svgHeight - 2)
+            .attr("font-size", 9)
+            .attr("font-family", "sans-serif")
+            .attr("fill", "white");
+
+    infoBtnsG.on("click", function(d) {
+
+                let zoneName = d.zone;
+
+                if (infoBtnActive == zoneName) {
+                    infoBtnActive = 'none';
+                    update(portfolio);
+                    return;
+                };
+
+                infoBtnActive = zoneName;
+                // names of countries in the zone
+                let zoneCountryNames = zonesByCountry[d.zone];
+                // empty object to fill with zone country data (amts of each asset)
+                let zoneCountries = {};
+                // starting data to copy the subset from
+                let allCountries = portfolioDistributions.countries;
+
+                zoneCountryNames.forEach(function(d) {
+                    let key = d.toUpperCase();
+                    // copy across
+                    if (Object.keys(allCountries).includes(key)) {
+                    zoneCountries[key] = allCountries[key];
+                    } else { console.log('cannot find', key, 'in portfolioDistributions') };
+                });
+                // console.log('zoneCountries2', clone(zoneCountries));
+                // console.log('keys', Object.keys(clone(zoneCountries)));
+                // console.log('portf', clone(zoneCountries));
+                // get them ordered
+                orderedZoneCountries = orderCountries(zoneCountries, maxColumns);
+                // update the chart
+                updateCountryChart(orderedZoneCountries, byCountry);
+    });
+    
+
+
+    newBars.on("mouseover", function(d) {
+                console.log('xzones2', clone(xzones));
+                // don't know why need to pass the global variable here
+                var boxSum = sumObj(portfolioDistributions.zones[d.zone]);
+                var boxH = yScale(0) - yScale(boxSum);
+                tempX = clone(xzones);
+                console.log('boxSum', boxSum);
+                svg.append("rect")
+                      .attr("x", d3.select(this).attr("x") - 1)
+                      .attr("width", d3.select(this).attr("width") + 2)
+                      .attr("y", yScale(boxSum) - 1)
+                      .attr("height", boxH + 2)
+                      .attr("class", "tooltip")
+                      .attr("fill", "none")
+                      .attr("stroke", "black")
+                      .attr("stroke-width", "0px")
+                      .transition()
+                      .duration(300)
+                      .attr("stroke-width", "3px")
+                var ttList = makeProfile(d.zone, xzones);
+                for (i in ttList) {
+                    svg.append("text")
+                      .attr("x", 0.82*svgWidth).attr("y", margin.top + 5 + i*10)
+                      .attr("class", "tooltip")
+                      .text(ttList[i]) 
+                      .attr("fill-opacity", 0)
+                      .transition()
+                      .delay(200)
+                      .duration(800)
+                      .attr("fill-opacity", 1);
+                };
+
+
+     });
+
+    newBars.on("mouseout", function() {
+                d3.selectAll('.tooltip')
+                    .transition()
+                    .duration(200)
+                    .remove() } );
 
     // merge with update and transition all to new sizes
-    .merge(bars)
-    .transition().duration(dur)
+    newBars.merge(bars)
+          .transition().duration(dur)
           .style("fill", function(d, i) {
-              if (Object.keys(colors).includes(d.key)) { return colors[d.key]; }
-              else { return 'gray'; };
+              if (Object.keys(colors).includes(d.zone)) {
+                  return colors[d.zone];
+              } else { return 'gray'; };
           })
               
-          .attr("height", d => svgHeight - yScale(d.value) - margin.bottom)
-          .attr("x", d => xScale(d.key) + margin.left)
-          .attr("y", d => yScale(d.value))
-          .attr("text", d => d.value);
+          .attr("fill-opacity", function(d, i) {
+              if (d['type'] == 'bond') { return 0.6; };
+              if (d['type'] == 'stock') { return 0.8; };
+              return 1;
+          })
+          .attr("height", d => svgHeight
+                                - yScale(d.end - d.start)
+                                - margin.bottom)
+          .attr("x", d => xScale(d.zone) + margin.left)
+          .attr("y", d => yScale(d.end))
+          .attr("text", d => d.end - d.start) ;
 
     // exit old bars stage left, diminishing and going transparent
     bars.exit()
-        .attr("fill-opacity", 1)
-            .transition()
-            .duration(dur)
-            .attr("fill-opacity", 0)
-            // .attr("x", svgWidth - xScale.bandwidth() / 2)
-            .attr("y", margin.top)
-            .transition()
-            .attr("height", 0)
-            // .attr("width", 0)
-            .remove();
+        .transition()
+        .duration(dur)
+        .attr("fill-opacity", 0)
+        .attr("y", margin.top)
+        .transition()
+        .attr("height", 0)
+        // .attr("width", 0)
+        .remove();
 
     // make enter selection for labels, initiate on right
     labels = svg.selectAll('.barLabels')
-                  .data(data1, d => d.key )
+                  .data(newData, d => (d.zone + d.type));
 
     labels.enter().append('text')
         .attr('class', 'barLabels')
@@ -193,29 +496,21 @@ function update() {
         .merge(labels)
         .transition().duration(dur)
           .attr("fill-opacity", 1)
-          .attr("x", d => xScale(d.key)
+          .attr("x", d => xScale(d.zone)
                           + margin.left + (xScale.bandwidth() / 2))
 
-          .attr("y", function(d, i) {
-            barTop = yScale(d.value);
-            if (barTop > svgHeight - margin.bottom - 25) {
-              return barTop - 5;
-            }
-            return barTop + 15;
-          })
+          .attr("y", (d, i) => yScale(d.end) + 10)
 
           .text(function(d,i) {
-            return d.value;
+            var rectVal = yScale(d.start) - yScale(d.end);
+            if (rectVal > minBarH) { return f(d.end - d.start); };
           })
 
+          // .style("font-size", "8px")
           .attr("font-family", "sans-serif")
           .attr("text-anchor", "middle")
+          .attr("fill", "white")  ;
 
-          .attr("fill", function(d, i) {
-             barTop = yScale(d.value);
-             if (barTop > svgHeight - margin.bottom - 25) { return "steelBlue"; }
-             else { return "white"; }
-          });
 
     // exit old labels to left
     labels.exit()
@@ -242,110 +537,437 @@ function update() {
 };
 
 
-function make_data() {
+// main function for drawing and redrawing chart
+function updateCountryChart(countryData, chartObj) {
 
-    var countries_used = [];
-        data_out = [] 
-        rand_len = Math.round(Math.random() * rand_max) + 4
+    var svgWidth = chartObj.svgWidth;
+    var svgHeight = chartObj.svgHeight;
+    var margin = chartObj.margin;
+    var svg = chartObj.svg;
+    var xScale = chartObj.xScale;
+    var yScale = chartObj.yScale;
+    var xAxis = chartObj.xAxis;
+    var yAxis = chartObj.yAxis;
 
-    for (var i=0; i < rand_len; i++) {
-        var co = country_list[Math.round(Math.random() * rand_max)];
-        var val = Math.round(Math.random() * rand_max);
-        if (!countries_used.includes(co)) {
-          data_out.push({key: co, value: val});
-          countries_used.push(co);
-          // console.log('added', co, 'value', val, 'index', ind);
+    var newData = flatten(countryData, 'country');
+
+    // update scale domains
+    xScale.domain(newData.map(a => a.country));
+    yScale.domain([0, d3.max(newData, d => Number(d.end))]);
+    
+    // rebind data
+    var bars = svg.selectAll("rect").data(newData, d => (d.country
+                                                         + d.type));
+    
+    // if there is an update selection, will still have old bar widths
+    bars.transition('enterWidth') // need to name this or all breaks
+        .duration(dur)
+        .attr("width", xScale.bandwidth());
+    
+    // get enter bar selection - situate at right end, zero size
+    newBars = bars.enter();
+
+    newBars.append("rect")
+            .attr("class", "bar")
+            .attr("class", d => d.type)
+            .each(function(d) { d3.select(this).classed(d.country, true) } )
+            .attr("x", svgWidth)
+            .attr("y", svgHeight - margin.bottom)
+            .attr("width", xScale.bandwidth())
+            .on("mouseover", function(d) {
+                let boxSum = sumObj(countryData[d.country]);
+                var boxH = yScale(0) - yScale(boxSum);
+                svg.append("rect")
+                      .attr("x", d3.select(this).attr("x") - 1)
+                      .attr("width", d3.select(this).attr("width") + 2)
+                      .attr("y", yScale(boxSum) - 1)
+                      .attr("height", boxH + 2)
+                      .attr("class", "tooltip")
+                      .attr("fill", "none")
+                      .attr("stroke", "black")
+                      .attr("stroke-width", "0px")
+                      .transition()
+                      .duration(300)
+                      .attr("stroke-width", "3px")
+                var ttList = makeProfile(d.country, countryData);
+                for (i in ttList) {
+                    svg.append("text")
+                      .attr("x", 0.5*svgWidth).attr("y", margin.top + 5 + i*10)
+                      .attr("class", "tooltip")
+                      .text(ttList[i]) 
+                      .attr("fill-opacity", 0)
+                      .transition()
+                      .delay(200)
+                      .duration(800)
+                      .attr("fill-opacity", 1)
+                };
+
+               })
+            .on("mouseout", function() {
+                d3.selectAll('.tooltip')
+                    .transition()
+                    .duration(200)
+                    .remove() } )
+
+    // merge with update and transition all to new sizes
+    .merge(bars)
+    .transition().duration(dur)
+          .style("fill", function(d, i) {
+              if (Object.keys(colors).includes(d.country)) {
+                  return colors[d.country];
+              } else { return 'gray'; };
+          })
+              
+          .attr("fill-opacity", function(d, i) {
+              if (d['type'] == 'bond') { return 0.6; };
+              if (d['type'] == 'stock') { return 0.8; };
+              return 1;
+          })
+          .attr("height", d => svgHeight
+                                - yScale(d.end - d.start)
+                                - margin.bottom)
+          .attr("x", d => xScale(d.country) + margin.left)
+          .attr("y", d => yScale(d.end))
+          .attr("text", d => d.end - d.start) ;
+
+    // exit old bars stage left, diminishing and going transparent
+    bars.exit()
+        .transition()
+        .duration(dur)
+        .attr("fill-opacity", 0)
+        // .attr("y", margin.top)
+        // .transition()
+        // .attr("height", 0)
+        // .attr("width", 0)
+        .remove();
+
+    // make enter selection for labels, initiate on right
+    labels = svg.selectAll('.barLabels')
+                  .data(newData, d => (d.country + d.type));
+
+    labels.enter().append('text')
+        .attr('class', 'barLabels')
+        .attr("fill-opacity", 0)
+        .attr("x", svgWidth)
+        .attr("y", svgHeight - margin.bottom)
+
+    // merge with update selection and transition all labels to right place
+        .merge(labels)
+        .transition().duration(dur)
+          .attr("fill-opacity", 1)
+          .attr("x", d => xScale(d.country)
+                          + margin.left + (xScale.bandwidth() / 2))
+
+          .attr("y", (d, i) => yScale(d.end) + 10)
+
+          .text(function(d,i) {
+            var rectVal = yScale(d.start) - yScale(d.end);
+            if (rectVal > minBarH) { return f(d.end - d.start); };
+          })
+
+          // .style("font-size", "8px")
+          .attr("font-family", "sans-serif")
+          .attr("text-anchor", "middle")
+          .attr("fill", "white")  ;
+
+
+    // exit old labels to left
+    labels.exit()
+            .transition()
+            .duration(dur)
+            .attr("fill-opacity", 0)
+            // .attr("x", svgWidth)
+            // .attr("y", svgHeight - margin.bottom)
+            // .attr("height", 0)
+            // .attr("width", 0)
+            .remove();
+
+    // update axes
+    svg.select('.xAxis')
+        .transition().duration(dur)
+            .call(xAxis)
+                .selectAll('text')
+                    .attr('transform', 'translate(0, 5)');
+
+    svg.select('.yAxis')
+        .transition().duration(dur)
+            .call(yAxis);
+
+};
+
+
+
+function removeRow(input) {
+    input.remove();
+};
+
+
+function addFundRow() {
+    fundRow = inputTable.append('tr');
+    fundRow.append('td').append('input')
+                .attr('type', 'text')
+                .attr('value', '?')
+                .attr('class', 'fund_row fundName');
+
+    fundRow.append('td').append('input')
+                .attr('type', 'number')
+                .attr('value', 0)
+                .attr('class', 'fund_row fundAmt');
+
+    fundRow.append('td').append('button')
+                .text('x')
+                .attr('class', 'remove-btn');
+
+
+    // think I have to repeat this now
+    removeBtns = d3.selectAll('.remove-btn')
+    removeBtns.on('click', function() { this.parentNode
+                                            .parentNode.remove() });
+};
+
+
+
+function parseInputTable(mode) {
+
+	if (mode == 'percent') { byPercent = true }
+	else { byPercent = false };
+
+
+    var fundSet = Object.keys(funds);
+    var out = {};
+    var divisor;
+    let portfolioSum = 0;
+    var names = document.getElementsByClassName('fundName');
+    var amts = document.getElementsByClassName('fundAmt');
+
+    for (var i=0; i<names.length; i++) {
+        name = names[i].value.toUpperCase();
+        amt = amts[i].value;
+
+        if (fundSet.includes(name)) {
+          out[name] = Number(amt);
+          portfolioSum += Number(amt);
         }
-    }
+        
+        else { alert(name + ' is not in set of funds - ignoring it'); }
+    };
 
-    return data_out.sort((a, b) => b.value - a.value);
+
+    if (byPercent) {
+        divisor = portfolioSum / 100;
+
+        Object.keys(out).forEach(x => out[x] /= divisor );
+    };
+
+    return out;
 }
 
 
-function get_portfolio_distribution(portfolio, fundsDistributions) {
+
+function getPortfolioDistribution(portfolio, funds) {
     // for an input portfolio of funds, returns the distribution
     // across countries - given a dataset of distributions of each
     // fund across countries (fundsDistribution)
 
-    var countryDistro = {}, // the output object containing the distribution
-        zoneDistro = {}; // not used yet
-        fee = 0; // not used yet
-        out1 = []
-        out2 = []
-        toAdd = 0,
-        valSum = 0;
-        numberOfBars = 10;
+    // create empty object for each country in the portfolio
+    var countries = {}; // the output object containing the distribution
 
-    var f = d3.format(".1f");
-    var fund, c;
+    // create empty object for each zone in the portfolio
+    var zones = {}; // not used yet
+
+    var assets = {};
+
+    // initialise the fee
+    var fee = 0 // not used yet
+
 
     // go through each fund in the portfolio
-    for (fund in portfolio) {
-        console.log('in', fund);
+    for (var fund in portfolio) {
 
-        // go through each country in the fund
-        for (c in fundsDistributions[fund]['countries']) {
-            console.log('in', c)
+        // get type of asset
+        var assetType = funds[fund].type;
+
+        // add to total for that asset type, initialising if reqd
+        if (!(assetType in assets)) {
+            assets[assetType] = 0;
+        };
+
+        assets[assetType] += portfolio[fund];
+
+        // go through each country in the fund, finding the
+        // amount of the fund in the country, and adding to the running
+        // sum for that country
+        for (var zone in funds[fund]['zones']) {
+
+            // check if zone already in object - if not, initialise it
+            if (!(zone in zones)) {
+                zones[zone] = {}
+                zones[zone]['zoneSum'] = 0;
+            };
+
+            // // check if type already in object, initialise if not
+            if (!(assetType in zones[zone])) {
+                zones[zone][assetType] = 0;
+            };
+
+
+            // get percentage for that zone in the fund, and weight
+            // by multiplying by the amount of that fund in the portfolio 
+            // - note values passed are in %, so need div 100
+            var percentageOfFund = funds[fund]['zones'][zone] / 100;
+            var amtInZone = portfolio[fund];
+            var toAdd = percentageOfFund * amtInZone;
+
+            // increment the corresponding country in the output distribution
+            zones[zone][assetType] += toAdd;
+            zones[zone]['zoneSum'] += toAdd;
+        };
+
+        for (var country in funds[fund]['countries']) {
 
             // check if country already in object - if not, initialise it
-            if (!(c in countryDistro)) {
-                countryDistro[c] = 0;
-            }
+            if (!(country in countries)) {
+                countries[country] = {}
+                countries[country]['countrySum'] = 0;
+            };
+
+            // // check if type already in object, initialise if not
+            if (!(assetType in countries[country])) {
+                countries[country][assetType] = 0;
+            };
+
 
             // get percentage for that country in the fund, and weight
             // by multiplying by the amount of that fund in the portfolio 
-            toAdd = fundsDistributions[fund]['countries'][c] * portfolio[fund];
-            console.log('toAdd', fundsDistributions[fund]['countries'][c])
+            // - note values passed are in %, so need div 100
+            var percentageOfFund = funds[fund]['countries'][country] / 100;
+            var amtInCountry = portfolio[fund];
+            var toAdd = percentageOfFund * amtInCountry;
 
             // increment the corresponding country in the output distribution
-            countryDistro[c] += toAdd;
+            countries[country][assetType] += toAdd;
+            countries[country]['countrySum'] += toAdd;
+        };
+    };
 
-            // and increment the sum for the distribution
-            valSum += toAdd;
-        }
+    return { countries: countries, zones: zones, assets: assets };
+};
 
-        // go through each zone in the fund
-        for (c in fundsDistributions[fund]['zones']) {
-            console.log('in', c)
+testOrderCountries = {
+    a: { bonds: 1, stock: 1 },
+    b: { bonds: 8, stock: 1 },
+    c: { bonds: 1, stock: 6 },
+    d: { bonds: 2, stock: 2 },
+    e: { gold: 8 },
+}
 
-            // check if country already in object - if not, initialise it
-            if (!(c in zoneDistro)) {
-                countryDistro[c] = 0;
-            }
+function orderCountries(countriesIn, numberOfBars) {   
+    /*Return an object of top countries, trimmed to numberOfBars,
+     with assets for each, including 'other', which includes
+     all countries outside numberOfBars*/
 
-            // get percentage for that country in the fund, and weight
-            // by multiplying by the amount of that fund in the portfolio 
-            toAdd = fundsDistributions[fund]['zones'][c] * portfolio[fund];
-            console.log('toAdd', fundsDistributions[fund]['zones'][c])
 
-            // increment the corresponding country in the output distribution
-            zoneDistro[c] += toAdd;
+    // get a list of all countries with their individual and summed assets
+    // - needs to be a list, so can sort it
+    // - eg [ { country: CHN, bond: 3.5, stock: 2.4 }, 
+    //        { country: USA, bond: 2.5, stock: 1.4 } ] 
+    let countryList = []
 
-            // and increment the sum for the distribution
-            valSum += toAdd;
-        }
-    }
+    for (let country in countriesIn) {
+        let countryLine = clone(countriesIn[country]);
+        countryLine['country'] = country;
+        countryLine['sum'] = sumObj(countryLine);
+        countryList.push(countryLine);
+    };
 
-    // reweight values to 1 using the sum of all values added
-    for (c in countryDistro) {
-        out1.push({ key: c, value: countryDistro[c] / valSum });
-    }
-
-    // sort
-    out1 = out1.sort((a, b) => b.value - a.value);
-
-    // take top numberOfBars and sum the rest
-    var others_sum = out1.slice(numberOfBars).map(a => a.value).reduce((a,b) => a + b, 0);
-    out2 = out1.slice(0, numberOfBars);
-    var others_len = out1.length - numberOfBars;
-    out2.push({ key: "+" + others_len, value: others_sum });
     
-    // format to %
-    for (var c in out2) {
-        out2[c].value = f(100 * out2[c].value);
+    // sort by sum and select topN
+
+    countryList = countryList.sort((a, b) => b.sum - a.sum);
+
+    if (countryList.length > numberOfBars) {
+
+        countryList = countryList.slice(0, numberOfBars);
+
+        // Now make the 'other' element
+        // make the sum across all countries for each asset $assetSums
+        // - eg { bond: 17.1, stock: 9.5, gold: 8.1 }
+
+        let assetSums = sumAssetsAcrossArea(countriesIn);
+        let topNAssetSums = sumAssetsAcrossArea(countryList);
+
+        // for each asset, subtract topN sum from total for that asset
+        //
+        let other = {country: 'other'};
+
+        for (asset in assetSums) {
+            other[[asset]] = assetSums[asset] - topNAssetSums[asset];
+        };
+
+        countryList.push(other);
+    };
+
+    // clean up before returning - delete sums, use country as key
+    outObj = {};
+    countryList.forEach(c => {
+        delete c.sum;
+        let countryName = c.country;
+        delete c.country;
+        outObj[[countryName]] = c;
+    });
+    return outObj;
+
+};
+
+
+function sumAssetsAcrossArea(areas) {
+    // works for objects and lists
+
+    assetSums = {};
+
+    for (area in areas) {
+        for (asset in areas[area]) {
+
+            if (!Object.keys(assetSums).includes(asset)) {
+                assetSums[asset] = 0;
+            };
+
+            assetSums[asset] += areas[area][asset];
+        };
+    };
+
+    return assetSums;
+};
+
+
+function makeColors() {
+
+    // set up colors for likely countries (not all)
+    let country_list = ['USA', 'FRA', 'DEU',
+                        'JPN', 'ITA', 'CAN', 'CHN',
+                        'ESP', 'NLD', 'KOR', 'RUS', 'IND', 'BRA']
+
+    let colors = {};
+    for (var i=0; i<country_list.length; i++) {
+        colors[country_list[i]] = d3.schemeCategory20[i];
     }
     
-    return out2;
+    colors['NoN'] = 'gold';
+    colors['GBR'] = 'darkRed';
+    colors['uk'] = 'darkRed';
+    colors['na'] = colors.USA;
+    colors['cn'] = colors.CHN;
+    colors['nn'] = colors.NON;
+    colors['eu'] = colors.DEU;
+    colors['la'] = colors.BRA;
+    colors['as'] = colors.JPN;
+    colors['em'] = colors.IND;
+    colors['pc'] = colors.RUS;
+    colors['bond'] = 'steelBlue';
+    colors['stock'] = 'steelBlue';
+    colors['gold'] = 'gold';
+
+    return colors;
 };
 
 
@@ -358,7 +980,165 @@ var portfolio_x = {
     'XDUS': 11.09,
 };
 
+var testPortfolio = {
+    xfas: 5,
+    xfab: 1,
+    xfag: 1,
+    xfbs: 1,
+    xfbb: 1,
+    xfbg: 1,
+}
+
+var testFunds = {
+    xfas: { countries: { USA: 76, GBR: 20, FRA: 3, NDL: 1 },
+            zones: { NA: 76, UK: 20, EU: 4 },
+            type: 'bond',
+            fee: 0.05 },
+    xfab: { countries: { USA: 76, GBR: 20, FRA: 3, NDL: 1 },
+            zones: { NA: 76, UK: 20, EU: 4 },
+            type: 'stock',
+            fee: 0.03 },
+    xfag: { countries: { NON: 100 },
+            zones: { nn: 100 },
+            type: 'gold',
+            fee: 0.07 },
+
+    xfbs: { countries: { USA: 10, GBR: 86, DEU: 3, NDL: 1 },
+            zones: { NA: 10, UK: 86, EU: 4 },
+            type: 'bond',
+            fee: 0.05 },
+    xfbb: { countries: { USA: 10, GBR: 86, DEU: 3, NDL: 1 },
+            zones: { NA: 10, UK: 86, EU: 4 },
+            type: 'stock',
+            fee: 0.03 },
+    xfbg: { countries: { NON: 100 },
+            zones: { nn: 100 },
+            type: 'gold',
+            fee: 0.07 },
+}
 
 
+function flatten(areas, areaType) {
+
+    if (!['country', 'zone'].includes(areaType)) {
+        alert('areaType passed to flatten needs to be country or zone');
+        return 1;
+    };
 
 
+    /* return data in form:
+    [
+      {country: 'USA', type: 'bond', start: '0', end: '6', key: 'USA-bond'},
+      {country: 'USA', type: 'stock', start: '6', end: '8', key: 'USA-stock'},
+      {country: 'JPN', type: 'stock', start: '0', end: '3', key: 'JPN-stock'},
+      {country: 'JPN', type: 'bond', start: '3', end: '7', key: 'JPN-bond'},
+      {country: 'NON', type: 'gold', start: '0', end: '12', key: 'NON-gold'},
+    ]
+        */
+    // for each country / zone
+    // for each type
+    // make an entry
+    var out = []; 
+
+    for (var area in areas) {
+        var lastEnd = 0;
+        delete areas[area].countrySum;
+        delete areas[area].zoneSum;
+        assets = Object.keys(areas[area]).sort().reverse();
+
+        assets.forEach( function(asset) {
+            var row = {};
+            row[areaType] = area;
+            row['type'] = asset;
+            row['start'] = f(lastEnd);
+            var amt = areas[area][asset];
+            row['end'] = f(lastEnd + amt);
+            out.push(row);
+            lastEnd += amt;
+        });
+
+    };
+
+    return out;
+};
+
+
+function clone(obj) {
+    var copy;
+
+    // Handle the 3 simple types, and null or undefined
+    if (null == obj || "object" != typeof obj) return obj;
+
+    // Handle Date
+    if (obj instanceof Date) {
+        copy = new Date();
+        copy.setTime(obj.getTime());
+        return copy;
+    }
+
+    // Handle Array
+    if (obj instanceof Array) {
+        copy = [];
+        for (var i = 0, len = obj.length; i < len; i++) {
+            copy[i] = clone(obj[i]);
+        }
+        return copy;
+    }
+
+    // Handle Object
+    if (obj instanceof Object) {
+        copy = {};
+        for (var attr in obj) {
+            if (obj.hasOwnProperty(attr)) copy[attr] = clone(obj[attr]);
+        }
+        return copy;
+    }
+
+    throw new Error("Unable to copy obj! Its type isn't supported.");
+}
+
+
+function makeProfile(area, areaData) {
+
+    areaRow = areaData[area];
+    out = [];
+
+    var areaName;
+    if (( area == 'NON') || ( area == 'nn')) {
+        areaName = 'Not National' }
+    else { areaName = area };
+
+    Object.keys(areaRow)
+        .forEach(a => {
+            if (areaRow[a] > 0.05 ) {
+                out.push(a + ": " + f(areaRow[a]));
+            }
+        })
+    out = out.sort()
+    out.unshift(areaName);
+
+    return out;
+}
+
+
+function sumObj(inObj) {
+    return d3.sum(Object.values(inObj));
+};
+
+
+function sumAssets(portfolio) {
+    assetTypes = {};
+
+    for (area in portfolio) {
+        for (asset in portfolio[area]) {
+            console.log('asset', asset);
+            if (!(Object.keys(assetTypes).includes(asset))) {
+                assetTypes[asset] = 0;
+            };
+
+            assetTypes[asset] += portfolio[area][asset];
+        };
+    };
+
+    return assetTypes;
+};

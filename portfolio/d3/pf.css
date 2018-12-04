@@ -2,6 +2,12 @@
   box-sizing: border-box;    
 }
 
+div {
+  /* border-style: solid; */
+  /* border-color: steelblue; */
+  /* border-width: 1px; */
+}
+
 .container {
 }
 
@@ -11,7 +17,7 @@
   border-radius: 5px;
   border-width: 2px;
   padding: 5px;
-  height: 300px;
+  height: 390px;
   width: 740px;
 }
 
@@ -19,13 +25,24 @@
 #table-container {
   float: left;
   height: 100%;
-  width: 20%;
+  width: 23%;
 }
 
 #chart-container {
   float: left;
   height: 100%;
-  width: 80%;
+  width: 66%;
+}
+
+#right-panel-container {
+  float: left;
+  width: 11%;
+  height: 100%;
+  /* border-style: solid; */
+  /* border-color: red; */
+  /* border-width: 1px; */
+  font-family: sans-serif;
+  font-size: 10px;
 }
 
 #chart1 {
@@ -44,11 +61,11 @@
 }
 
 #chart2 {
-  width: 30%;
+  width: 32%;
 }
 
 #chart3 {
-  width: 70%;
+  width: 68%;
 }
 
 table {
@@ -74,6 +91,7 @@ table {
 
 .fund_row {
   width: 40px;
+  font-size: 10px;
   display: inline;
 }
 
@@ -82,7 +100,7 @@ table {
 }
 
 button {
-  background-color: Grey;
+  background-color: grey;
   border: none;
   color: white;
   text-align: center;
@@ -99,6 +117,11 @@ button {
   background-color: DarkRed;
 }
 
+.info-btn, #update-btn {
+  font-size: 7px;
+  background-color: green;
+}
+
 .table-heading {
   font-family: Arial, sans-serif;
   font-size: 10px;
@@ -107,7 +130,7 @@ button {
 }
 
 td {
-  height: 30px;
+  height: 25px;
 }
 
 .xAxis {
@@ -118,10 +141,32 @@ td {
   font-size: 8px;
 }
 
+input {
+  font-family: sans-serif;
+  font-size: 10px;
+  font-color: DarkGrey;
+  align: center;
+}
+
+#radio-labels {
+  float: left;
+  align: right-top;
+  width: 70%;
+  height: 30px;
+}
+
+.rad {
+  padding: 10px;
+}
 
 .tooltip {
   font-family: sans-serif;
   font-size: 10px;
   font-weight: bold;
   font-color: DarkGrey;
+}
+
+.fundAmt {
+  width: 30px;
+  text-align: right;
 }
