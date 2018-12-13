@@ -136,8 +136,12 @@ td {
 
 .chart-title {
   font-family: Arial, sans-serif;
-  font-size: 14;
+  font-size: 12;
   fill: steelBlue;
+}
+
+.chart-title.data-source {
+  fill: black;
 }
 
 .xAxis {
@@ -164,6 +168,13 @@ input {
 
 .rad {
   padding: 10px;
+}
+
+.sum {
+  font-family: sans-serif;
+  font-size: 10px;
+  font-weight: bold;
+  font-color: DarkGrey;
 }
 
 .tooltip {

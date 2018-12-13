@@ -1,4 +1,3 @@
-var tempX;
 // general variables
 var dur = 1500
     f = d3.format(".1f")
@@ -12,7 +11,7 @@ var colors = makeColors(),
 var countryData, zoneData;
 
 // set up input table and buttons
-var inputTable = d3.select('#input_table tbody')
+var inputTable = d3.select('#input_table')
 var inputRows = d3.selectAll('.fundAmt')
 
 var addRowBtn = d3.select('#addRow-btn')
@@ -26,7 +25,7 @@ var removeBtns = d3.selectAll('.remove-btn')
 var infoBtns = d3.selectAll('.info-btn');
 
 var modeBtn = d3.selectAll('input[name="mode"]')
-var mode = 'percent'
+var mode = 'byPercent'
 
 // initialize country chart
 var byAsset = initByAsset();
@@ -34,22 +33,23 @@ var byCountry = initByCountry();
 var byZone = initByZone();
 
 // Get the initial portfolio and make charts
-var portfolio = parseInputTable(mode);
+var portfolio = parseInputTable();
     update(portfolio, 'Whole portfolio');
 
 
 // ACTIONS
 
 updateBtn.on('click', function() {
-    portfolio = parseInputTable(mode);
+    portfolio = parseInputTable();
     update(portfolio, 'Whole portfolio') } );
 
 modeBtn.on("change", function() { 
-	if (mode == 'percent') { mode = 'actual' }
-	else { mode = 'percent' };
+	if (mode == 'byPercent') { mode = 'byAmt' }
+	else { mode = 'byPercent' };
 	console.log('new mode', mode);
-    portfolio = parseInputTable(mode);
-	update(portfolio, false, modeChange=true);
+    byCountry.update('none', mode);
+    byZone.update('none', mode);
+
 });
 
 var infoBtnActive = 'none';
@@ -62,694 +62,51 @@ infoBtns.on("click", function() {
         return;
     };
     infoBtnActive = fundName;
-    let singlePortfolio = { [fundName]: 100 };
-    if (mode !== 'percent') {
-        singlePortfolio[fundName] = portfolio[fundName] };
+
+    let singlePortfolio = { [fundName]: portfolio[fundName] };
 
     console.log('calling update for', singlePortfolio);
     update(singlePortfolio, fundName + " fund only");
 });
 
 
-// inputTable.on("change", function() { console.log('changed table'); })
+inputTable.on("change", function() {
+    console.log('changed table');
+
+    newPortfolio = parseInputTable();
+
+    if (hasChanged([newPortfolio, portfolio])) {
+        console.log('changed values');
+    } else {console.log('not changed values') };
+});
 
 
 // FUNCTION DEFINITIONS
 
-function update(portfolio, dataSource, modeChange=false) {
-    portfolioDistributions = getPortfolioDistribution(portfolio, funds);
-    assetKeys = Object.keys(portfolioDistributions.assets);
+function update(portfolio, dataSource) {
+    console.log('portfolio in x', portfolio);
 
-	if (modeChange == false) {
-		updateAssetChart(portfolioDistributions, byAsset) };
+    portfolioDistributions = getPortfolioDistribution(portfolio, funds);
 
     countryData = orderCountries(portfolioDistributions.countries, maxColumns);
+    var countryData = flatten(countryData, 'country');
+    byCountry.update(countryData, mode, dataSource);
 
-    updateCountryChart(countryData, byCountry, dataSource);
+    var zoneData = flatten(portfolioDistributions.zones, 'zone');
+    byZone.update(zoneData, mode, dataSource);
 
-    updateZoneChart(portfolioDistributions.zones, byZone, dataSource);
+    byAsset.update(portfolioDistributions.assets, mode);
+
+    pfSum = d3.select('#table-container').selectAll('div.sum')
+        .data([sumObj(portfolio)]);
+    pfSum.enter()
+        .append('div')
+        .attr('style', 'float: left')
+        .attr('class', 'sum')
+        .text(d => 'sum:  ' + d);
+    pfSum
+        .text(d => 'sum:' + d);
 };
-
-function initByAsset() {
-    console.log('initializing asset chart');
-
-    var byAsset = {
-        svgHeight: 170,
-        svgWidth: 170,
-    }
-
-    byAsset.radius = (Math.min(byAsset.svgHeight, byAsset.svgWidth) - 20) / 2;
-
-
-    byAsset['svg'] = d3.select("#chart2").append("svg")
-           .attr("width", byAsset.svgWidth)
-           .attr("height", byAsset.svgHeight)
-             .append("g")
-                 .attr("transform",
-                       "translate(" + byAsset.svgWidth/2
-                                 + "," + (byAsset.svgHeight/2 + 15) +")");
-
-    byAsset['arc'] = d3.arc()
-                        .outerRadius(byAsset.radius - 15)
-                        .innerRadius(30);
-
-    byAsset['svg'].append("text")
-                    .attr("class", "chart-title")
-                    .attr("transform", "translate(-20, -80)")
-                    .text("Assets");
-
-    var pie = d3.pie();
-
-    var g = byAsset.svg.selectAll("arc")
-                .data(pie([1]))
-                .enter()
-                .append("g")
-                .attr("class", "arc")
-                .attr("fill", "lightgrey");
-
-    g.append("path")
-        .attr("d", byAsset.arc)
-
-    return byAsset;
-
-};
-
-function updateAssetChart(portfolioDistributions, chartObj) {
-    console.log('updating asset chart');
-
-    // cannot get updating to work, except by actually removing prev
-    // - problem seems to be in making the selection.  It grows each time, 
-    // i.e. the enter selection is always 3 (shd by 0 apart from first update)
-    d3.select('#chart2').selectAll('path').remove();
-
-    let svg = chartObj.svg;
-    let arc = chartObj.arc;
-    let svgHeight = chartObj.svgHeight;
-    let svgWidth = chartObj.svgWidth;
-    let radius = chartObj.radius;
-
-    var pieData = [];
-    Object.keys(portfolioDistributions.assets).forEach( a => {
-        if (a != 'countrySum') {
-            // pieData.push(a);
-            let row = {asset: a, value: portfolioDistributions.assets[a]};
-            pieData.push(row);
-        };
-    });
-
-    var pie = d3.pie()
-        .value(function(d) { return d.value; })(pieData);
-    
-
-    var g = svg.selectAll("arc")
-                .data(pie, d => d.data.asset);
-
-
-    var h = g.enter()
-                .append("g")
-                .attr("class", "arc");
-
-    h.append("path")
-        .attr("d", arc)
-        .transition()
-        .duration(dur)
-        .style("fill", d => colors[d.data.asset])
-        .style("fill-opacity", d => {
-            if (d.data.asset == 'bond') {
-                return 0.5;
-            } else { return 0.85; };
-        });
-
-
-    h.on('mouseover', function(d) { 
-        var mData = d;
-        svg.append('text')
-            .attr("class", "tooltip")
-            .attr("x", -1)
-            .attr("y", -5)
-            .attr("text-anchor", "middle")
-            .text( function(d) { return mData.data.asset;} )
-            .attr("fill-opacity", 0).transition().delay(200).duration(500)
-            .attr("fill-opacity", 1);
-        svg.append('text')
-            .attr("class", "tooltip")
-            .attr("x", 0)
-            .attr("y", 10)
-            .attr("text-anchor", "middle")
-            // .text("heye")
-            .text( function(d) { return f(mData.data.value) + "%";} )
-            .attr("fill-opacity", 0).transition().delay(200).duration(500)
-            .attr("fill-opacity", 1);
-    });
-
-    h.on('mouseout', function() {
-        d3.selectAll('.tooltip')
-            .transition().duration(200).remove();
-    });
-
-    return pieData;
-
-    
-};
-
-function initByZone() {
-// Initializes the zone chart
-
-    byZone = {
-        svgHeight: 190,
-        svgWidth: 314,
-        margin: {"top": 55, "bottom": 30, "left": 45, "right":5},
-    };
-
-    byZone.chartWidth = byZone.svgWidth
-        - (byZone.margin.left + byZone.margin.right);
-    byZone.chartHeight = byZone.svgHeight
-        - (byZone.margin.top + byZone.margin.bottom);
-
-
-    // svg, scales, empty axes and button
-    byZone['svg'] = d3.select("#chart3").append("svg")
-              .attr("width", byZone.svgWidth)
-              .attr("height", byZone.svgHeight)
-
-    byZone['yScale'] = d3.scaleLinear()
-                .domain([0, 100])
-                .range([byZone.svgHeight - byZone.margin.bottom,
-                        byZone.margin.top])
-
-    byZone['xScale'] = d3.scaleBand()
-                .range([0, byZone.chartWidth])
-                .align(0)
-                .padding(0.05)
-
-    byZone['yAxis'] = d3.axisLeft().scale(byZone.yScale)
-                .ticks(6)
-                .tickSizeOuter(0)
-
-    byZone['xAxis'] = d3.axisBottom().scale(byZone.xScale)
-                .tickSize(0)
-
-    byZone.svg.append('g')
-        .attr('class', 'xAxis byZone')
-        .attr('transform', 'translate(' + (byZone.margin.left) + ', '
-                                        + (byZone.chartHeight
-                                            + byZone.margin.top) + ')')
-        .call(byZone.xAxis)
-            .selectAll('text')
-            .attr('transform', 'translate(0, 5)')
-
-    byZone.svg.append('g')
-        .attr('class', 'yAxis byZone')
-        .attr('transform', 'translate(' + (byZone.margin.left - 1) + ', 0)')
-        .call(byZone.yAxis);
-
-    byZone.svg.append('text')
-        .attr("class", "chart-title")
-        .attr("transform", "translate(70, 20)")
-        .text("Zones")
-
-    return byZone;
-};
-
-
-
-function initByCountry() {
-// Initializes the country chart
-
-    byCountry = {
-        svgHeight: 180,
-        svgWidth: 465,
-        margin: {"top": 35, "bottom": 20, "left": 45, "right":5},
-    };
-
-    byCountry.chartWidth = byCountry.svgWidth
-        - (byCountry.margin.left + byCountry.margin.right);
-    byCountry.chartHeight = byCountry.svgHeight
-        - (byCountry.margin.top + byCountry.margin.bottom);
-
-
-    // svg, scales, empty axes and button
-    byCountry['svg'] = d3.select("#chart1").append("svg")
-              .attr("width", byCountry.svgWidth)
-              .attr("height", byCountry.svgHeight)
-
-    byCountry['yScale'] = d3.scaleLinear()
-                .domain([0, 100])
-                .range([byCountry.svgHeight - byCountry.margin.bottom,
-                        byCountry.margin.top])
-
-    byCountry['xScale'] = d3.scaleBand()
-                .range([0, byCountry.chartWidth])
-                .align(0)
-                .padding(0.05)
-
-    byCountry['yAxis'] = d3.axisLeft().scale(byCountry.yScale)
-                .ticks(6)
-                .tickSizeOuter(0)
-
-    byCountry['xAxis'] = d3.axisBottom().scale(byCountry.xScale)
-                .tickSize(0)
-
-    byCountry.svg.append('g')
-        .attr('class', 'xAxis')
-        .attr('transform', 'translate(' + (byCountry.margin.left) + ', '
-                                        + (byCountry.chartHeight
-                                            + byCountry.margin.top) + ')')
-        .call(byCountry.xAxis)
-            .selectAll('text')
-            .attr('transform', 'translate(0, 5)')
-
-    byCountry.svg.append('g')
-        .attr('class', 'yAxis')
-        .attr('transform', 'translate(' + (byCountry.margin.left - 1) + ', 0)')
-        .call(byCountry.yAxis);
-
-    byCountry.svg.append('text')
-        .attr("class", "chart-title")
-        .attr("transform", "translate(70, 20)")
-        .text("Countries")
-
-    return byCountry;
-};
-
-
-// main function for drawing and redrawing chart
-function updateZoneChart(xzones, chartObj, dataSource) {
-
-    console.log('xzones0', xzones);
-
-    var svgWidth = chartObj.svgWidth;
-    var svgHeight = chartObj.svgHeight;
-    var margin = chartObj.margin;
-    var svg = chartObj.svg;
-    var xScale = chartObj.xScale;
-    var yScale = chartObj.yScale;
-    var xAxis = chartObj.xAxis;
-    var yAxis = chartObj.yAxis;
-
-    if (dataSource) {
-        svg.select("text.data-source").remove();
-        svg.select("text.data-source").remove()
-        svg.append("text")
-            .attr("class", "chart-title data-source")
-            .attr("transform", "translate(120, 20)")
-            .attr("font-style", "italic")
-            .text(dataSource);
-    };
-
-    var newData = flatten(xzones, 'zone');
-    console.log('newData', newData);
-
-    // update scale domains
-    xScale.domain(newData.map(a => a.zone));
-    yScale.domain([0, d3.max(newData, d => Number(d.end))]);
-    
-    // rebind data
-    var bars = svg.selectAll("rect").data(newData, d => (d.zone
-                                                         + d.type));
-    
-    // get enter bar selection - situate at right end, zero size
-    var newBars = bars.enter()
-            .append("rect")
-            .attr("class", "bar")
-            .attr("class", d => d.type)
-            .each(function(d) { d3.select(this).classed(d.zone, true) } )
-            .attr("x", svgWidth)
-            .attr("y", svgHeight - margin.bottom)
-            .attr("width", xScale.bandwidth());
-
-    console.log('xzones1', clone(xzones));
-
-    var infoBtns = svg.selectAll("g.zone-info")
-            .data(newData, d => d.zone)
-            .enter().append("g")
-                .attr("class", "zone-info");
-
-    infoBtns.append("rect")
-            .attr("x", d => xScale(d.zone) + margin.left + 2)
-            .attr("y", svgHeight - 10)
-            .transition("infoBtns-zone").delay(dur).duration(dur)
-            .attr("width", xScale.bandwidth() - 4)
-            .attr("height", 20)
-            .attr("fill", "green");
-
-    infoBtns.append("text")
-            .text("i") 
-            .attr("x", d => xScale(d.zone) + margin.left + xScale.bandwidth()/2)
-            .attr("y", svgHeight - 2)
-            .attr("font-size", 9)
-            .attr("font-family", "sans-serif")
-            .attr("cursor", "pointer")
-            .attr("fill", "white");
-
-    infoBtns.on("click", function(d) {
-
-                let zoneName = d.zone;
-
-                if (infoBtnActive == zoneName) {
-                    infoBtnActive = 'none';
-                    update(portfolio);
-                    return;
-                };
-
-                infoBtnActive = zoneName;
-                // names of countries in the zone
-                let zoneCountryNames = zonesByCountry[d.zone];
-                // empty object to fill with zone country data (amts of each asset)
-                let zoneCountries = {};
-                // starting data to copy the subset from
-                let allCountries = portfolioDistributions.countries;
-
-                zoneCountryNames.forEach(function(d) {
-                    let key = d.toUpperCase();
-                    // copy across
-                    if (Object.keys(allCountries).includes(key)) {
-                    zoneCountries[key] = allCountries[key];
-                    } else { console.log('cannot find', key, 'in portfolioDistributions') };
-                });
-                // console.log('zoneCountries2', clone(zoneCountries));
-                // console.log('keys', Object.keys(clone(zoneCountries)));
-                // console.log('portf', clone(zoneCountries));
-                // get them ordered
-                let orderedZoneCountries = orderCountries(zoneCountries, maxColumns);
-                if (mode == 'percent') {
-                    let zoneSum = sumObj(portfolioDistributions.zones[d.zone]);
-                    console.log('percenting zones', orderedZoneCountries);
-                    let perZoneCountries = {};
-                    for (country in orderedZoneCountries) {
-                        perZoneCountries[country] = {};
-                        for (asset in orderedZoneCountries[country]) {
-                            perZoneCountries[country][asset]
-                                = orderedZoneCountries[country][asset] * 100 / zoneSum;
-                        };
-                    };
-                    orderedZoneCountries = perZoneCountries;
-                };
-                // update the chart
-                updateCountryChart(orderedZoneCountries, byCountry, zoneLookup[d.zone] + " zone");
-    });
-    
-
-
-    newBars.on("mouseover", function(d) {
-                console.log('xzones2', clone(xzones));
-                // don't know why need to pass the global variable here
-                var boxSum = sumObj(portfolioDistributions.zones[d.zone]);
-                var boxH = yScale(0) - yScale(boxSum);
-                tempX = clone(xzones);
-                console.log('boxSum', boxSum);
-                svg.append("rect")
-                      .attr("x", d3.select(this).attr("x") - 1)
-                      .attr("width", d3.select(this).attr("width") + 2)
-                      .attr("y", yScale(boxSum) - 1)
-                      .attr("height", boxH + 2)
-                      .attr("class", "tooltip")
-                      .attr("fill", "none")
-                      .attr("stroke", "black")
-                      .attr("stroke-width", "0px")
-                      .transition()
-                      .duration(300)
-                      .attr("stroke-width", "3px")
-                var ttList = makeProfile(d.zone, xzones);
-                for (i in ttList) {
-                    svg.append("text")
-                      .attr("x", 0.82*svgWidth).attr("y", margin.top + 5 + i*10)
-                      .attr("class", "tooltip")
-                      .text(ttList[i]) 
-                      .attr("fill-opacity", 0)
-                      .transition()
-                      .delay(200)
-                      .duration(800)
-                      .attr("fill-opacity", 1);
-                };
-
-
-     });
-
-    newBars.on("mouseout", function() {
-                d3.selectAll('.tooltip')
-                    .transition()
-                    .duration(200)
-                    .remove() } );
-
-    // merge with update and transition all to new sizes
-    newBars.merge(bars)
-          .transition().duration(dur)
-          .style("fill", function(d, i) {
-              if (Object.keys(colors).includes(d.zone)) {
-                  return colors[d.zone];
-              } else { return 'gray'; };
-          })
-              
-          .attr("fill-opacity", function(d, i) {
-              if (d['type'] == 'bond') { return 0.6; };
-              if (d['type'] == 'stock') { return 0.8; };
-              return 1;
-          })
-          .attr("height", d => svgHeight
-                                - yScale(d.end - d.start)
-                                - margin.bottom)
-          .attr("x", d => xScale(d.zone) + margin.left)
-          .attr("y", d => yScale(d.end))
-          .attr("text", d => d.end - d.start) ;
-
-    // exit old bars stage left, diminishing and going transparent
-    bars.exit()
-        .transition()
-        .duration(dur)
-        .attr("fill-opacity", 0)
-        .attr("y", margin.top)
-        .transition()
-        .attr("height", 0)
-        // .attr("width", 0)
-        .remove();
-
-    // make enter selection for labels, initiate on right
-    labels = svg.selectAll('.barLabels')
-                  .data(newData, d => (d.zone + d.type));
-
-    labels.enter().append('text')
-        .attr('class', 'barLabels')
-        .attr("fill-opacity", 0)
-        .attr("x", svgWidth)
-        .attr("y", svgHeight - margin.bottom)
-
-    // merge with update selection and transition all labels to right place
-        .merge(labels)
-        .transition().duration(dur)
-          .attr("fill-opacity", 1)
-          .attr("x", d => xScale(d.zone)
-                          + margin.left + (xScale.bandwidth() / 2))
-
-          .attr("y", (d, i) => yScale(d.end) + 10)
-
-          .text(function(d,i) {
-            var rectVal = yScale(d.start) - yScale(d.end);
-            if (rectVal > minBarH) { return f(d.end - d.start); };
-          })
-
-          // .style("font-size", "8px")
-          .attr("font-family", "sans-serif")
-          .attr("text-anchor", "middle")
-          .attr("fill", "white")  ;
-
-
-    // exit old labels to left
-    labels.exit()
-            .transition()
-            .duration(dur)
-            .attr("fill-opacity", 0)
-            // .attr("x", svgWidth)
-            // .attr("y", svgHeight - margin.bottom)
-            // .attr("height", 0)
-            // .attr("width", 0)
-            .remove();
-
-    // update axes
-    svg.select('.xAxis')
-        .transition().duration(dur)
-            .call(xAxis)
-                .selectAll('text')
-                    .attr('transform', 'translate(0, 5)');
-
-    svg.select('.yAxis')
-        .transition().duration(dur)
-            .call(yAxis);
-
-};
-
-
-// main function for drawing and redrawing chart
-function updateCountryChart(countryData, chartObj, dataSource) {
-
-    var svgWidth = chartObj.svgWidth;
-    var svgHeight = chartObj.svgHeight;
-    var margin = chartObj.margin;
-    var svg = chartObj.svg;
-    var xScale = chartObj.xScale;
-    var yScale = chartObj.yScale;
-    var xAxis = chartObj.xAxis;
-    var yAxis = chartObj.yAxis;
-
-    if (dataSource) {
-        svg.select("text.data-source").remove();
-
-        svg.append("text")
-            .attr("class", "chart-title data-source")
-            .attr("transform", "translate(170, 20)")
-            .attr("font-style", "italic")
-            .text("")
-            .transition("country title in")
-            .duration(dur)
-            .text(dataSource);
-    };
-
-    var newData = flatten(countryData, 'country');
-
-    // update scale domains
-    xScale.domain(newData.map(a => a.country));
-    yScale.domain([0, d3.max(newData, d => Number(d.end))]);
-    
-    // rebind data
-    var bars = svg.selectAll("rect").data(newData, d => (d.country
-                                                         + d.type));
-    
-    // if there is an update selection, will still have old bar widths
-    bars.transition('enterWidth') // need to name this or all breaks
-        .duration(dur)
-        .attr("width", xScale.bandwidth());
-    
-    // get enter bar selection - situate at right end, zero size
-    newBars = bars.enter();
-
-    newBars.append("rect")
-            .attr("class", "bar")
-            .attr("class", d => d.type)
-            .each(function(d) { d3.select(this).classed(d.country, true) } )
-            .attr("x", svgWidth)
-            .attr("y", svgHeight - margin.bottom)
-            .attr("width", xScale.bandwidth())
-            .on("mouseover", function(d) {
-                let boxSum = sumObj(countryData[d.country]);
-                var boxH = yScale(0) - yScale(boxSum);
-                svg.append("rect")
-                      .attr("x", d3.select(this).attr("x") - 1)
-                      .attr("width", d3.select(this).attr("width") + 2)
-                      .attr("y", yScale(boxSum) - 1)
-                      .attr("height", boxH + 2)
-                      .attr("class", "tooltip")
-                      .attr("fill", "none")
-                      .attr("stroke", "black")
-                      .attr("stroke-width", "0px")
-                      .transition()
-                      .duration(300)
-                      .attr("stroke-width", "3px")
-                var ttList = makeProfile(d.country, countryData);
-                for (i in ttList) {
-                    svg.append("text")
-                      .attr("x", 0.5*svgWidth).attr("y", margin.top + 5 + i*10)
-                      .attr("class", "tooltip")
-                      .text(ttList[i]) 
-                      .attr("fill-opacity", 0)
-                      .transition()
-                      .delay(200)
-                      .duration(800)
-                      .attr("fill-opacity", 1)
-                };
-
-               })
-            .on("mouseout", function() {
-                d3.selectAll('.tooltip')
-                    .transition()
-                    .duration(200)
-                    .remove() } )
-
-    // merge with update and transition all to new sizes
-    .merge(bars)
-    .transition().duration(dur)
-          .style("fill", function(d, i) {
-              if (Object.keys(colors).includes(d.country)) {
-                  return colors[d.country];
-              } else { return 'gray'; };
-          })
-              
-          .attr("fill-opacity", function(d, i) {
-              if (d['type'] == 'bond') { return 0.6; };
-              if (d['type'] == 'stock') { return 0.8; };
-              return 1;
-          })
-          .attr("height", d => svgHeight
-                                - yScale(d.end - d.start)
-                                - margin.bottom)
-          .attr("x", d => xScale(d.country) + margin.left)
-          .attr("y", d => yScale(d.end))
-          .attr("text", d => d.end - d.start) ;
-
-    // exit old bars stage left, diminishing and going transparent
-    bars.exit()
-        .transition()
-        .duration(dur)
-        .attr("fill-opacity", 0)
-        // .attr("y", margin.top)
-        // .transition()
-        // .attr("height", 0)
-        // .attr("width", 0)
-        .remove();
-
-    // make enter selection for labels, initiate on right
-    labels = svg.selectAll('.barLabels')
-                  .data(newData, d => (d.country + d.type));
-
-    labels.enter().append('text')
-        .attr('class', 'barLabels')
-        .attr("fill-opacity", 0)
-        .attr("x", svgWidth)
-        .attr("y", svgHeight - margin.bottom)
-
-    // merge with update selection and transition all labels to right place
-        .merge(labels)
-        .transition().duration(dur)
-          .attr("fill-opacity", 1)
-          .attr("x", d => xScale(d.country)
-                          + margin.left + (xScale.bandwidth() / 2))
-
-          .attr("y", (d, i) => yScale(d.end) + 10)
-
-          .text(function(d,i) {
-            var rectVal = yScale(d.start) - yScale(d.end);
-            if (rectVal > minBarH) { return f(d.end - d.start); };
-          })
-
-          // .style("font-size", "8px")
-          .attr("font-family", "sans-serif")
-          .attr("text-anchor", "middle")
-          .attr("fill", "white")  ;
-
-
-    // exit old labels to left
-    labels.exit()
-            .transition()
-            .duration(dur)
-            .attr("fill-opacity", 0)
-            // .attr("x", svgWidth)
-            // .attr("y", svgHeight - margin.bottom)
-            // .attr("height", 0)
-            // .attr("width", 0)
-            .remove();
-
-    // update axes
-    svg.select('.xAxis')
-        .transition().duration(dur)
-            .call(xAxis)
-                .selectAll('text')
-                    .attr('transform', 'translate(0, 5)');
-
-    svg.select('.yAxis')
-        .transition().duration(dur)
-            .call(yAxis);
-
-};
-
 
 
 function removeRow(input) {
@@ -782,16 +139,11 @@ function addFundRow() {
 
 
 
-function parseInputTable(mode) {
-
-	if (mode == 'percent') { byPercent = true }
-	else { byPercent = false };
+function parseInputTable() {
 
 
     var fundSet = Object.keys(funds);
     var out = {};
-    var divisor;
-    let portfolioSum = 0;
     var names = document.getElementsByClassName('fundName');
     var amts = document.getElementsByClassName('fundAmt');
 
@@ -801,17 +153,9 @@ function parseInputTable(mode) {
 
         if (fundSet.includes(name)) {
           out[name] = Number(amt);
-          portfolioSum += Number(amt);
         }
         
         else { alert(name + ' is not in set of funds - ignoring it'); }
-    };
-
-
-    if (byPercent) {
-        divisor = portfolioSum / 100;
-
-        Object.keys(out).forEach(x => out[x] /= divisor );
     };
 
     return out;
@@ -956,7 +300,7 @@ function orderCountries(countriesIn, numberOfBars) {
         let other = {country: 'other'};
 
         for (asset in assetSums) {
-            other[[asset]] = assetSums[asset] - topNAssetSums[asset];
+            other[[asset]] = assetSums[asset] - (topNAssetSums[asset] || 0);
         };
 
         countryList.push(other);
@@ -982,7 +326,7 @@ function sumAssetsAcrossArea(areas) {
 
     for (area in areas) {
         for (asset in areas[area]) {
-
+            if (asset === 'country') { console.log('country'); continue; };
             if (!Object.keys(assetSums).includes(asset)) {
                 assetSums[asset] = 0;
             };
@@ -1012,7 +356,7 @@ function makeColors() {
     colors['uk'] = 'darkRed';
     colors['na'] = colors.USA;
     colors['cn'] = colors.CHN;
-    colors['nn'] = colors.NON;
+    colors['nn'] = colors.NoN;
     colors['eu'] = colors.DEU;
     colors['la'] = colors.BRA;
     colors['as'] = colors.JPN;
@@ -1215,4 +559,57 @@ function sumAssets(portfolio) {
     };
 
     return assetTypes;
+};
+
+
+function hasChanged(portfolios) {
+    // reports whether a portfolio has changed, treating absent funds as equal
+    // to zero (so that adding an empty fund is NOT a change)
+
+    // get unique fund names
+    let funds = new Set(Object.keys(portfolios[0])
+                        .concat(Object.keys(portfolios[1])));
+
+    funds = Array.from(funds);
+
+    for (let i in funds) {
+
+        let a = 0, b = 0;
+        let fund = funds[i];
+
+        if (Object.keys(portfolios[0]).includes(fund)) {
+            a = portfolios[0][fund]
+        };
+
+        if (Object.keys(portfolios[1]).includes(fund))
+        { b = portfolios[1][fund]
+        };
+
+        if (a !== b) { return true; };
+    };
+
+    return false;
+
+};
+
+
+function getPercents(chartArray) {
+    // input array in form [{area: 'x', type: 't', start: 's', end: 'e'}]
+    // get sum, and divide all by this
+    let totalAmt = chartArray.reduce((acc, elem) => {
+            acc += (elem.end - elem.start);
+            return acc;
+    }, 0);
+
+    totalAmt /= 100;
+
+    console.log('totalAmt', totalAmt);
+
+    newArr = chartArray.map(row => {
+        row.start /= totalAmt;
+        row.end /= totalAmt;
+        return row;
+    });
+
+    return newArr;
 };
