@@ -1,55 +1,58 @@
 // general variables
-var dur = 1500
-    f = d3.format(".1f")
-    minBarH = 15
-    maxColumns = 14;
+const dur = 1500,
+      f = d3.format(".1f"),
+      f0 = d3.format(".0f"),
+      f2 = d3.format(".2f"),
+      // minBarH = 15,
+      maxColumns = 16;
 
-var colors = makeColors(),
-    zoneLookup = makeZoneLookup()
-
-// unless declare these globally, they aren't updated in the mousovers (??)
-var countryData, zoneData;
+// load external data
+var funds = getFunds(),
+    colors = makeColors(),
+    zoneLookup = makeZoneLookup();
 
 // set up input table and buttons
-var inputTable = d3.select('#input_table')
-var inputRows = d3.selectAll('.fundAmt')
-
-var addRowBtn = d3.select('#addRow-btn')
-              .on("click", function() { addFundRow() });
-
-var updateBtn = d3.select('#update-btn')
-
-var removeBtns = d3.selectAll('.remove-btn')
-                   .on('click', function() { this.parentNode
-                                                 .parentNode.remove() });
-var infoBtns = d3.selectAll('.info-btn');
-
-var modeBtn = d3.selectAll('input[name="mode"]')
-var mode = 'byPercent'
+var inputTable = d3.select('#input_table'),
+    inputRows = d3.selectAll('.fundAmt'),
+    addRowBtn = d3.select('#addRow-btn').on("click", function() { addFundRow() }),
+    updateBtn = d3.select('#update-btn'),
+    removeBtns = d3.selectAll('.remove-btn')
+                   .on('click', function() {
+                       this.parentNode.parentNode.remove();
+                       portfolio = parseInputTable();
+                       setTimeout(update(portfolio,
+                                'Whole portfolio', funds), 1500);
+                   }),
+    infoBtns = d3.selectAll('.info-btn'),
+    modeBtn = d3.selectAll('input[name="mode"]');
 
 // initialize country chart
 var byAsset = initByAsset();
 var byCountry = initByCountry();
 var byZone = initByZone();
 
+// initialise global mode variable
+var mode = 'byPercent';
+
 // Get the initial portfolio and make charts
 var portfolio = parseInputTable();
-    update(portfolio, 'Whole portfolio');
+update(portfolio, 'Whole portfolio', funds);
 
 
 // ACTIONS
 
 updateBtn.on('click', function() {
     portfolio = parseInputTable();
-    update(portfolio, 'Whole portfolio') } );
+    update(portfolio, 'Whole portfolio', funds)
+});
 
 modeBtn.on("change", function() { 
 	if (mode == 'byPercent') { mode = 'byAmt' }
 	else { mode = 'byPercent' };
 	console.log('new mode', mode);
-    byCountry.update('none', mode);
-    byZone.update('none', mode);
-
+    byCountry.update(mode);
+    byZone.update(mode);
+    byAsset.update(mode);
 });
 
 var infoBtnActive = 'none';
@@ -58,15 +61,14 @@ infoBtns.on("click", function() {
 
     if (infoBtnActive == fundName) {
         infoBtnActive = 'none';
-        update(portfolio, 'Whole portfolio');
+        update(portfolio, 'Whole portfolio', funds);
         return;
     };
     infoBtnActive = fundName;
 
     let singlePortfolio = { [fundName]: portfolio[fundName] };
 
-    console.log('calling update for', singlePortfolio);
-    update(singlePortfolio, fundName + " fund only");
+    update(singlePortfolio, fundName + " fund only", funds);
 });
 
 
@@ -78,24 +80,25 @@ inputTable.on("change", function() {
     if (hasChanged([newPortfolio, portfolio])) {
         console.log('changed values');
     } else {console.log('not changed values') };
+    setTimeout(update(newPortfolio, 'Whole portfolio', funds), 1500);
 });
 
 
 // FUNCTION DEFINITIONS
 
-function update(portfolio, dataSource) {
-    console.log('portfolio in x', portfolio);
+function update(portfolio, dataSource, funds) {
 
     portfolioDistributions = getPortfolioDistribution(portfolio, funds);
 
-    countryData = orderCountries(portfolioDistributions.countries, maxColumns);
-    var countryData = flatten(countryData, 'country');
-    byCountry.update(countryData, mode, dataSource);
+    byCountry.setData(portfolioDistributions.countries, dataSource, maxColumns);
+    console.log('mode in update', mode);
+    byCountry.update(mode);
 
-    var zoneData = flatten(portfolioDistributions.zones, 'zone');
-    byZone.update(zoneData, mode, dataSource);
+    byZone.setData(portfolioDistributions.zones, dataSource, maxColumns);
+    byZone.update(mode);
 
-    byAsset.update(portfolioDistributions.assets, mode);
+    byAsset.setData(portfolioDistributions.assets);
+    byAsset.update(mode);
 
     pfSum = d3.select('#table-container').selectAll('div.sum')
         .data([sumObj(portfolio)]);
@@ -105,7 +108,17 @@ function update(portfolio, dataSource) {
         .attr('class', 'sum')
         .text(d => 'sum:  ' + d);
     pfSum
-        .text(d => 'sum:' + d);
+        .text(d => 'sum:  ' + d);
+
+    pfFee = d3.select('#table-container').selectAll('div.fee')
+        .data([portfolioDistributions.fee]);
+    pfFee.enter()
+        .append('div')
+        .attr('style', 'float: left')
+        .attr('class', 'fee')
+        .text(d => 'fee:  ' + f2(d) + " %");
+    pfFee
+        .text(d => 'fee:  ' + f2(d) + " %");
 };
 
 
@@ -177,9 +190,11 @@ function getPortfolioDistribution(portfolio, funds) {
     var assets = {};
 
     // initialise the fee
-    var fee = 0 // not used yet
+    var fee = 0; // not used yet
+    var portfolioSum = sumObj(portfolio);
 
 
+    console.log('funds passed to getportfolio', funds);
     // go through each fund in the portfolio
     for (var fund in portfolio) {
 
@@ -192,6 +207,9 @@ function getPortfolioDistribution(portfolio, funds) {
         };
 
         assets[assetType] += portfolio[fund];
+
+        // increment the fee
+        fee += (funds[fund]["fee_%"] * portfolio[fund] / portfolioSum)
 
         // go through each country in the fund, finding the
         // amount of the fund in the country, and adding to the running
@@ -249,7 +267,7 @@ function getPortfolioDistribution(portfolio, funds) {
         };
     };
 
-    return { countries: countries, zones: zones, assets: assets };
+    return { countries: countries, zones: zones, assets: assets, fee: fee };
 };
 
 testOrderCountries = {
@@ -326,7 +344,6 @@ function sumAssetsAcrossArea(areas) {
 
     for (area in areas) {
         for (asset in areas[area]) {
-            if (asset === 'country') { console.log('country'); continue; };
             if (!Object.keys(assetSums).includes(asset)) {
                 assetSums[asset] = 0;
             };
@@ -399,12 +416,12 @@ var portfolio_x = {
 };
 
 var testPortfolio = {
-    xfas: 5,
-    xfab: 1,
-    xfag: 1,
-    xfbs: 1,
-    xfbb: 1,
-    xfbg: 1,
+    xfas: 1000,
+    // xfab: 1,
+    // xfag: 1,
+    xfbs: 1000,
+    // xfbb: 1,
+    // xfbg: 1,
 }
 
 var testFunds = {
@@ -516,24 +533,48 @@ function clone(obj) {
 }
 
 
-function makeProfile(area, areaData) {
+function makeProfile(area, areaData, mode) {
+    // currently only works for countries
+    // need to fix for zones, taking out eg 'countrySum'
+    // maybe test at start for whether is zone or country
+    // and have a token accordingly
+    // ACTUALLY appears ok..?  must not be a 'countrySum' in zones (?)
+    
+    console.log('area in makeP', area);
 
-    areaRow = areaData[area];
-    out = [];
+    areaRow = areaData[mode][area];
 
     var areaName;
     if (( area == 'NON') || ( area == 'nn')) {
         areaName = 'Not National' }
     else { areaName = area };
 
+    out = [];
+
     Object.keys(areaRow)
         .forEach(a => {
-            if (areaRow[a] > 0.05 ) {
-                out.push(a + ": " + f(areaRow[a]));
+            if (a !== 'countrySum' && areaRow[a] > 0.05 ) {
+                if (mode === 'byAmt') {
+                    out.push(" - " + a + ": " + f(areaRow[a]));
+                };
+                if (mode === 'byPercent') {
+                    out.push(" - " + a + ": " + f0(areaRow[a]) + " %");
+                };
             }
         })
-    out = out.sort()
-    out.unshift(areaName);
+    out = out.sort();
+    var label = zoneLookup[areaName] || areaName;
+
+    if (mode === 'byAmt') {
+        var title = label + " " + f(sumObj(areaRow));
+        console.log('title', title);
+    };
+
+    if (mode === 'byPercent') {
+        var title = label + " " + f0(sumObj(areaRow)) + " %";
+        console.log('title', title);
+    };
+    out.unshift(title);
 
     return out;
 }
@@ -549,7 +590,6 @@ function sumAssets(portfolio) {
 
     for (area in portfolio) {
         for (asset in portfolio[area]) {
-            console.log('asset', asset);
             if (!(Object.keys(assetTypes).includes(asset))) {
                 assetTypes[asset] = 0;
             };
@@ -596,6 +636,8 @@ function hasChanged(portfolios) {
 function getPercents(chartArray) {
     // input array in form [{area: 'x', type: 't', start: 's', end: 'e'}]
     // get sum, and divide all by this
+    var chartArray = clone(chartArray);
+
     let totalAmt = chartArray.reduce((acc, elem) => {
             acc += (elem.end - elem.start);
             return acc;
@@ -603,13 +645,37 @@ function getPercents(chartArray) {
 
     totalAmt /= 100;
 
-    console.log('totalAmt', totalAmt);
-
     newArr = chartArray.map(row => {
         row.start /= totalAmt;
         row.end /= totalAmt;
         return row;
     });
 
+    console.log('newArr', clone(newArr));
     return newArr;
 };
+
+
+function getCountrySummary(acc, elem) {
+
+    if (!Object.keys(acc).includes(elem.country)) {
+        acc[elem.country] = {};
+    };
+
+    acc[elem.country][elem.type] = elem.end - elem.start;
+
+    return acc;
+};
+
+
+function getZoneSummary(acc, elem) {
+
+    if (!Object.keys(acc).includes(elem.zone)) {
+        acc[elem.zone] = {};
+    };
+
+    acc[elem.zone][elem.type] = elem.end - elem.start;
+
+    return acc;
+};
+

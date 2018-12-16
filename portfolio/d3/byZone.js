@@ -4,8 +4,24 @@ function initByZone() {
 
     byZone = {
         svgHeight: 190,
-        svgWidth: 314,
-        margin: {"top": 55, "bottom": 30, "left": 45, "right":5},
+        svgWidth: 324,
+        margin: {"top": 55, "bottom": 30, "left": 35, "right":5},
+
+        totalAmt: 1,
+        dataSource: 'none yet',
+        currentMode: 'none',
+        setData: setZoneData,
+        update: updateZoneChart,
+
+        chartData: {
+            byAmt: [],
+            byPercent: [],
+        },
+
+        mouseData: {
+            byAmt: [],
+            byPercent: [],
+        },
     };
 
     byZone.chartWidth = byZone.svgWidth
@@ -16,6 +32,7 @@ function initByZone() {
 
     // svg, scales, empty axes and button
     byZone['svg'] = d3.select("#chart3").append("svg")
+              .attr("class", "byZone")
               .attr("width", byZone.svgWidth)
               .attr("height", byZone.svgHeight)
 
@@ -52,7 +69,7 @@ function initByZone() {
 
     byZone.svg.append('text')
         .attr("class", "chart-title")
-        .attr("transform", "translate(70, 20)")
+        .attr("transform", "translate(95, 20)")
         .text("Zones")
 
     byZone['update'] = updateZoneChart;
@@ -60,12 +77,37 @@ function initByZone() {
     return byZone;
 };
 
+function setZoneData(newData, dataSource) {
+    this.coreData = newData;
+    this.dataSource = dataSource;
+
+    // create chartData byAmt and byPercent
+    this.totalAmt = sumObj(sumAssetsAcrossArea(newData)) / 2; // div 2 as zoneSums in there
+    this.chartData.byAmt = flatten(newData, 'zone');
+    this.chartData.byPercent = getPercents(this.chartData.byAmt);
+
+    // create mouseData byAmt and byPercent
+    this.mouseData.byAmt = newData;
+
+    x = {};
+    for (zone in newData) {
+        if (!Object.keys(x).includes(zone)) {
+            x[[zone]] = {};
+        };
+
+        for (elem in newData[zone]) {
+            x[zone][elem] = 100 * newData[zone][elem] 
+                        /  this.totalAmt;
+        };
+    };
+
+    this.mouseData.byPercent = x;
+
+};
+
 
 // main function for drawing and redrawing chart
-function updateZoneChart(newData='none', mode='none', dataSource='none') {
-
-    // if new data, then re plot the whole thing
-    // if no new data but mode different to current, replot with existing data
+function updateZoneChart(mode) {
 
     var svgWidth = this.svgWidth;
     var svgHeight = this.svgHeight;
@@ -76,43 +118,30 @@ function updateZoneChart(newData='none', mode='none', dataSource='none') {
     var xAxis = this.xAxis;
     var yAxis = this.yAxis;
 
-    if (newData !== 'none') {
-        this.chartData = newData;
-    };
+    this.currentMode = mode;
 
-    if (mode !== 'none') {
-        this.mode = mode;
-    };
+    var mouseData = this.mouseData;
+    var chartData = this.chartData[mode];
 
-    var chartData = clone(this.chartData);
 
-    if (this.mode === 'byPercent') {
-        console.log('applying percent to country');
-        chartData = getPercents(chartData);
-    };
+    // update title
+    var title = svg.selectAll("text.data-source")
+                    .data([this.dataSource], d => d);
 
-    console.log('chartData', chartData);
+    title.enter()
+        .text("")
+        .append("text")
+        .attr("class", "chart-title data-source")
+        .attr("transform", "translate(150, 20)")
+        .attr("fill", "black")
+        .attr("fill-opacity", 0)
+        .text(this.dataSource)
+        .transition("country title in")
+        .delay(dur / 2)
+        .duration(dur / 2)
+        .attr("fill-opacity", 1) ;
 
-    if (dataSource !== 'none') {
-
-        var title = svg.selectAll("text.data-source")
-                        .data([dataSource], d => d);
-
-        title.enter()
-            .text("")
-            .append("text")
-            .attr("class", "chart-title data-source")
-            .attr("transform", "translate(150, 20)")
-            .attr("fill", "black")
-            .attr("fill-opacity", 0)
-            .text(dataSource)
-            .transition("country title in")
-            .delay(dur / 2)
-            .duration(dur / 2)
-            .attr("fill-opacity", 1) ;
-
-        title.exit().transition("chart-title out").remove();
-    };
+    title.exit().transition("chart-title out").remove();
 
     // update scale domains
     xScale.domain(chartData.map(a => a.zone));
@@ -180,57 +209,78 @@ function updateZoneChart(newData='none', mode='none', dataSource='none') {
                     zoneCountries[key] = allCountries[key];
                     } else { console.log('cannot find', key, 'in portfolioDistributions') };
                 });
-                // console.log('zoneCountries2', clone(zoneCountries));
-                // console.log('keys', Object.keys(clone(zoneCountries)));
-                // console.log('portf', clone(zoneCountries));
-                // get them ordered
-                let orderedZoneCountries = orderCountries(zoneCountries, maxColumns);
-                let flatCountries = flatten(orderedZoneCountries, 'country');
         
-                // update the chart
-                byCountry.update(flatCountries, zoneLookup[d.zone] + " zone", mode);
+                // update the country chart
+                byCountry.setData(zoneCountries,
+                                  zoneLookup[d.zone] + " zone", maxColumns);
+                byCountry.update(mode);
+
+                // update the asset chart
+                // want in form like {stock: 150, bond: 53, gold: 25}
+                var zoneAssets = {};
+                for (var country in zoneCountries) {
+                    for (var elem in zoneCountries[country]) {
+                        if (elem == 'countrySum') { continue };
+                        if (!Object.keys(zoneAssets).includes(elem)) {
+                            zoneAssets[elem] = 0;
+                        };
+                        zoneAssets[elem] += zoneCountries[country][elem];
+                    };
+                };
+        
+                byAsset.setData(zoneAssets);
+                byAsset.update(mode);
+
+
     });
     
 
 
-    // newBars.on("mouseover", function(d) {
-    //             // don't know why need to pass the global variable here
-    //             var boxSum = sumObj(portfolioDistributions.zones[d.zone]);
-    //             var boxH = yScale(0) - yScale(boxSum);
-    //             console.log('boxSum', boxSum);
-    //             svg.append("rect")
-    //                   .attr("x", d3.select(this).attr("x") - 1)
-    //                   .attr("width", d3.select(this).attr("width") + 2)
-    //                   .attr("y", yScale(boxSum) - 1)
-    //                   .attr("height", boxH + 2)
-    //                   .attr("class", "tooltip")
-    //                   .attr("fill", "none")
-    //                   .attr("stroke", "black")
-    //                   .attr("stroke-width", "0px")
-    //                   .transition()
-    //                   .duration(300)
-    //                   .attr("stroke-width", "3px")
-    //             var ttList = makeProfile(d.zone, xzones);
-    //             for (i in ttList) {
-    //                 svg.append("text")
-    //                   .attr("x", 0.82*svgWidth).attr("y", margin.top + 5 + i*10)
-    //                   .attr("class", "tooltip")
-    //                   .text(ttList[i]) 
-    //                   .attr("fill-opacity", 0)
-    //                   .transition()
-    //                   .delay(200)
-    //                   .duration(800)
-    //                   .attr("fill-opacity", 1);
-    //             };
+    newBars.on("mouseover", function(d) {
+                // don't know why need to pass the global variable here
+                // - mode is passed to the update function which this sits in.
+                // The key question!! presumably mode gets bound when function declared
+                // or something
+                mode = byZone.currentMode;
+                console.log('mode in mouseover', mode);
+
+                let boxSum = sumObj(mouseData[mode][d.zone]);
+                console.log('boxSum', boxSum);
+                var boxH = yScale(0) - yScale(boxSum);
+                console.log('boxSum', boxSum);
+                svg.append("rect")
+                      .attr("x", d3.select(this).attr("x") - 1)
+                      .attr("width", d3.select(this).attr("width") + 2)
+                      .attr("y", yScale(boxSum) - 1)
+                      .attr("height", boxH + 2)
+                      .attr("class", "tooltip")
+                      .attr("fill", "none")
+                      .attr("stroke", "black")
+                      .attr("stroke-width", "0px")
+                      .transition()
+                      .duration(300)
+                      .attr("stroke-width", "3px");
+                var ttList = makeProfile(d.zone, mouseData, mode);
+                for (i in ttList) {
+                    svg.append("text")
+                      .attr("x", 0.82*svgWidth).attr("y", margin.top + 5 + i*10)
+                      .attr("class", "tooltip")
+                      .text(ttList[i]) 
+                      .attr("fill-opacity", 0)
+                      .transition()
+                      .delay(200)
+                      .duration(800)
+                      .attr("fill-opacity", 1);
+                };
 
 
-    //  });
+     });
 
-    // newBars.on("mouseout", function() {
-    //             d3.selectAll('.tooltip')
-    //                 .transition()
-    //                 .duration(200)
-    //                 .remove() } );
+    newBars.on("mouseout", function() {
+                d3.selectAll('.tooltip')
+                    .transition()
+                    .duration(200)
+                    .remove() } );
 
     // merge with update and transition all to new sizes
     newBars.merge(bars)
@@ -264,6 +314,7 @@ function updateZoneChart(newData='none', mode='none', dataSource='none') {
         // .attr("width", 0)
         .remove();
 
+/* LABELS
     // make enter selection for labels, initiate on right
     labels = svg.selectAll('.barLabels')
                   .data(chartData, d => (d.zone + d.type));
@@ -304,7 +355,7 @@ function updateZoneChart(newData='none', mode='none', dataSource='none') {
             // .attr("height", 0)
             // .attr("width", 0)
             .remove();
-
+*/
     // update axes
     svg.select('.xAxis')
         .transition().duration(dur)

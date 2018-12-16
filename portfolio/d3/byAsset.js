@@ -1,14 +1,34 @@
 
 function initByAsset() {
-    console.log('initializing asset chart x');
+    console.log('initializing asset chart');
 
     var byAsset = {
         svgHeight: 170,
         svgWidth: 170,
+
+        totalAmt: 1,
+        dataSource: 'none yet',
+        currentMode: 'none',
+        setData: setAssetData,
+        update: updateAssetChart,
+
+        pieData: {
+            byAmt: [],
+            byPercent: [],
+        },
+
+        mouseData: {
+            byAmt: [],
+            byPercent: [],
+        },
+        
+        initAssets: [{asset: 'bond', value: 1},
+                     {asset: 'stock', value: 1},
+                     {asset: 'gold', value: 1},
+        ],
     }
 
     byAsset.radius = (Math.min(byAsset.svgHeight, byAsset.svgWidth) - 20) / 2;
-
 
     byAsset['svg'] = d3.select("#chart2").append("svg")
            .attr("width", byAsset.svgWidth)
@@ -27,35 +47,70 @@ function initByAsset() {
                     .attr("transform", "translate(-20, -80)")
                     .text("Assets");
 
-    var pie = d3.pie();
+    var pie = d3.pie().value(d => d.value).sort(null);
 
     var g = byAsset.svg.selectAll("arc")
-                .data(pie([1]))
+                .data(pie(byAsset.initAssets))
                 .enter()
                 .append("g")
                 .attr("class", "arc")
-                .attr("fill", "lightgrey");
+                .attr("fill", "lightgrey")
+                .style("fill", d => colors[d.data.asset])
+                .style("fill-opacity", d => {
+                    if (d.data.asset == 'bond') {
+                        return 0.5;
+                    } else { return 0.85; };
+                });
 
     g.append("path")
         .attr("d", byAsset.arc)
-
-    byAsset['testFunc'] = function() { console.log('byAsset testFunc') };
-
-    byAsset['update'] = updateAssetChart;
-
-    byAsset['currentMode'] = 'byPercent';
 
     return byAsset;
 
 };
 
-function updateAssetChart(newData='none', mode='none') {
-    console.log('updating asset chart x');
+
+function setAssetData(newData) {
+
+    filledData = {};
+    allAssets = ['bond', 'stock', 'gold']; 
+
+    for (i in allAssets) {
+        filledData[allAssets[i]] = newData[allAssets[i]] || 0;
+    };
+
+    console.log('filled data', filledData);
+    this.coreData = filledData;
+
+    // // create chartData byAmt and byPercent
+    this.totalAmt = sumObj(byAsset.coreData);
+
+    this.pieData = { byAmt: [], byPercent: [] };
+
+    Object.keys(byAsset.coreData).forEach( a => {
+        if (a != 'countrySum') {
+            this.pieData['byAmt'].push({asset: a, value: newData[a]});
+            this.pieData['byPercent'].push({asset: a, value: 100 * newData[a] / this.totalAmt});
+        };
+    });
+
+    this.mouseData['byAmt'] = clone(this.coreData);
+    this.mouseData['byPercent'] = clone(this.coreData);
+
+    for (elem in this.mouseData['byPercent']) {
+        this.mouseData['byPercent'][elem] /= (this.totalAmt / 100);
+    };
+
+};
+
+
+function updateAssetChart(mode) {
+    console.log('updating asset chart, mode passed', mode);
 
     // cannot get updating to work, except by actually removing prev
     // - problem seems to be in making the selection.  It grows each time, 
     // i.e. the enter selection is always 3 (shd by 0 apart from first update)
-    d3.select('#chart2').selectAll('path').remove();
+    // d3.select('#chart2').selectAll('path').remove();
 
     let svg = this.svg;
     let arc = this.arc;
@@ -63,63 +118,25 @@ function updateAssetChart(newData='none', mode='none') {
     let svgWidth = this.svgWidth;
     let radius = this.radius;
 
-    if (newData !== 'none') {
-        this.chartData = newData;
-    };
-
-    if (mode !== 'none') {
-        this.mode = mode;
-    };
+    this.currentMode = mode;
     
-    var chartData = this.chartData;
+    var pieData = this.pieData[mode];
 
-    console.log('pie input', chartData);
-
-    // todo make percents
-
-    var pieData = [];
-
-    let divisor = 1;
-
-    if (mode === 'byPercent') {
-        divisor = sumObj(chartData) / 100;
-    };
-
-    Object.keys(chartData).forEach( a => {
-        if (a != 'countrySum') {
-            let row = {asset: a, value: chartData[a] / divisor};
-            pieData.push(row);
-        };
-    });
-
-    console.log('divisor', divisor);
     console.log('pieData', pieData);
 
-    var pie = d3.pie()
+    var pie = d3.pie().sort(null)
         .value(function(d) { return d.value; })(pieData);
-    
 
-    var g = svg.selectAll("arc")
+    var path = svg.selectAll("path")
                 .data(pie, d => d.data.asset);
 
-
-    var h = g.enter()
-                .append("g")
-                .attr("class", "arc");
-
-    h.append("path")
-        .attr("d", arc)
-        .transition()
+    path.transition('arc transition')
         .duration(dur)
-        .style("fill", d => colors[d.data.asset])
-        .style("fill-opacity", d => {
-            if (d.data.asset == 'bond') {
-                return 0.5;
-            } else { return 0.85; };
-        });
+        .attrTween("d", arcTween);
 
+    var g = svg.selectAll(".arc");
 
-    h.on('mouseover', function(d) { 
+    g.on('mouseover', function(d) { 
         var mData = d;
         svg.append('text')
             .attr("class", "tooltip")
@@ -136,19 +153,30 @@ function updateAssetChart(newData='none', mode='none') {
             .attr("text-anchor", "middle")
             // .text("heye")
             .text( function(d) {
-                if (mode == 'byPercent') { return f(mData.data.value) + "%" }
-                else { return f(mData.data.value) };
-            } )
+                console.log('by asset', byAsset);
+                let assetType = mData.data.asset;
+                console.log('asset type in mouse', assetType);
+                console.log('mode seen from asset mouse', byAsset.currentMode);
+                if (byAsset.currentMode === 'byPercent') {
+                    return f0(byAsset.mouseData['byPercent'][assetType]) + "%" }
+                else { return f0(byAsset.mouseData['byAmt'][assetType]) };
+            } ) 
             .attr("fill-opacity", 0).transition().delay(200).duration(500)
             .attr("fill-opacity", 1);
     });
 
-    h.on('mouseout', function() {
+    g.on('mouseout', function() {
         d3.selectAll('.tooltip')
             .transition().duration(200).remove();
     });
 
     return pieData;
-
-    
 };
+
+function arcTween(a) {
+  var i = d3.interpolate(this._current, a);
+  this._current = i(0);
+  return function(t) {
+    return byAsset.arc(i(t));
+  };
+}

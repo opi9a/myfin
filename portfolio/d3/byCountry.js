@@ -1,11 +1,30 @@
 
 function initByCountry() {
 // Initializes the country chart
+    // todo make update function take no parameters
+    // - instead, directly set the chart object's chartData,
+    //   dataSource and mode first, before calling update
 
     byCountry = {
         svgHeight: 180,
         svgWidth: 465,
         margin: {"top": 35, "bottom": 20, "left": 45, "right":5},
+
+        totalAmt: 1,
+        dataSource: 'none yet',
+        currentMode: 'none',
+        setData: setCountryData,
+        update: updateCountryChart,
+
+        chartData: {
+            byAmt: [],
+            byPercent: [],
+        },
+
+        mouseData: {
+            byAmt: [],
+            byPercent: [],
+        },
     };
 
     byCountry.chartWidth = byCountry.svgWidth
@@ -53,19 +72,42 @@ function initByCountry() {
     byCountry.svg.append('text')
         .attr("class", "chart-title")
         .attr("transform", "translate(70, 20)")
-        .text("Countries")
-
-    byCountry['update'] = updateCountryChart;
+        .text("Countries");
 
     return byCountry;
 };
 
+function setCountryData(newData, dataSource, maxColumns=12) {
+    this.coreData = newData;
+    this.dataSource = dataSource;
+
+    // create chartData byAmt and byPercent
+    var orderedData = orderCountries(newData, maxColumns);
+    this.totalAmt = sumObj(sumAssetsAcrossArea(orderedData)) / 2; // div 2 as countrySums in there
+    this.chartData.byAmt = flatten(orderedData, 'country');
+    this.chartData.byPercent = getPercents(this.chartData.byAmt);
+
+    // create mouseData byAmt and byPercent
+    this.mouseData.byAmt = orderedData;
+
+    x = {};
+    for (country in orderedData) {
+        if (!Object.keys(x).includes(country)) {
+            x[[country]] = {};
+        };
+
+        for (elem in orderedData[country]) {
+            x[country][elem] = 100 * orderedData[country][elem] 
+                        /  this.totalAmt;
+        };
+    };
+
+    this.mouseData.byPercent = x;
+
+};
 
 // main function for drawing and redrawing chart
-function updateCountryChart(newData='none', mode='none', dataSource='none') {
-    console.log('newData passed', newData);
-    console.log('dataSource passed', dataSource);
-    console.log('mode passed', mode);
+function updateCountryChart(mode) {
 
     var svgWidth = this.svgWidth;
     var svgHeight = this.svgHeight;
@@ -76,47 +118,34 @@ function updateCountryChart(newData='none', mode='none', dataSource='none') {
     var xAxis = this.xAxis;
     var yAxis = this.yAxis;
 
-    if (newData !== 'none') {
-        this.chartData = newData;
-    };
+    this.currentMode = mode;
+    var chartData = this.chartData[mode];
 
-    if (mode !== 'none') {
-        this.mode = mode;
-    };
+    console.log('country chartData', chartData);
+    console.log('mode in update country', mode);
 
-    var chartData = clone(this.chartData);
+    // make object of data by country, for mouseover on rects
+    var mouseData = this.mouseData;
 
-    if (this.mode === 'byPercent') {
-        console.log('applying percent to country');
-        chartData = getPercents(chartData);
-    };
+    // update title
+    var title = svg.selectAll("text.data-source")
+                    .data([this.dataSource], d => d);
 
-    console.log('chartData', chartData);
+    title.enter()
+        .text("")
+        .append("text")
+        .attr("class", "chart-title data-source")
+        .attr("transform", "translate(150, 20)")
+        .attr("fill", "black")
+        .attr("fill-opacity", 0)
+        .text(this.dataSource)
+        .transition("country title in")
+        .delay(dur / 2)
+        .duration(dur / 2)
+        .attr("fill-opacity", 1)
+    ;
 
-
-    if (dataSource !== 'none') {
-        this.dataSource = dataSource;
-
-        console.log('in chart title');
-        var title = svg.selectAll("text.data-source")
-                        .data([this.dataSource], d => d);
-
-        title.enter()
-            .text("")
-            .append("text")
-            .attr("class", "chart-title data-source")
-            .attr("transform", "translate(150, 20)")
-            .attr("fill", "black")
-            .attr("fill-opacity", 0)
-            .text(dataSource)
-            .transition("country title in")
-            .delay(dur / 2)
-            .duration(dur / 2)
-            .attr("fill-opacity", 1)
-        ;
-
-        title.exit().transition("chart-title out").remove();
-    };
+    title.exit().transition("chart-title out").remove();
 
 
     // update scale domains
@@ -143,7 +172,10 @@ function updateCountryChart(newData='none', mode='none', dataSource='none') {
             .attr("y", svgHeight - margin.bottom)
             .attr("width", xScale.bandwidth())
             .on("mouseover", function(d) {
-                let boxSum = sumObj(countryData[d.country]);
+                mode = byCountry.currentMode;
+                console.log('mode in mouseover', mode);
+                let boxSum = sumObj(mouseData[mode][d.country]);
+                console.log('boxSum', boxSum);
                 var boxH = yScale(0) - yScale(boxSum);
                 svg.append("rect")
                       .attr("x", d3.select(this).attr("x") - 1)
@@ -157,7 +189,7 @@ function updateCountryChart(newData='none', mode='none', dataSource='none') {
                       .transition()
                       .duration(300)
                       .attr("stroke-width", "3px")
-                var ttList = makeProfile(d.country, countryData);
+                var ttList = makeProfile(d.country, mouseData, mode);
                 for (i in ttList) {
                     svg.append("text")
                       .attr("x", 0.5*svgWidth).attr("y", margin.top + 5 + i*10)
@@ -209,6 +241,7 @@ function updateCountryChart(newData='none', mode='none', dataSource='none') {
         // .attr("width", 0)
         .remove();
 
+/* LABELS
     // make enter selection for labels, initiate on right
     labels = svg.selectAll('.barLabels')
                   .data(chartData, d => (d.country + d.type));
@@ -249,6 +282,7 @@ function updateCountryChart(newData='none', mode='none', dataSource='none') {
             // .attr("height", 0)
             // .attr("width", 0)
             .remove();
+*/
 
     // update axes
     svg.select('.xAxis')
