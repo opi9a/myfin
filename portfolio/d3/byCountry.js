@@ -71,7 +71,7 @@ function initByCountry() {
 
     byCountry.svg.append('text')
         .attr("class", "chart-title")
-        .attr("transform", "translate(70, 20)")
+        .attr("transform", "translate(43, 20)")
         .text("Countries");
 
     return byCountry;
@@ -83,6 +83,7 @@ function setCountryData(newData, dataSource, maxColumns=12) {
 
     // create chartData byAmt and byPercent
     var orderedData = orderCountries(newData, maxColumns);
+    console.log('orderedData in set country', orderedData);
     this.totalAmt = sumObj(sumAssetsAcrossArea(orderedData)) / 2; // div 2 as countrySums in there
     this.chartData.byAmt = flatten(orderedData, 'country');
     this.chartData.byPercent = getPercents(this.chartData.byAmt);
@@ -221,6 +222,7 @@ function updateCountryChart(mode) {
           .attr("fill-opacity", function(d, i) {
               if (d['type'] == 'bond') { return 0.6; };
               if (d['type'] == 'stock') { return 0.8; };
+              if (d['type'] == 'cash') { return 0.6; };
               return 1;
           })
           .attr("height", d => svgHeight

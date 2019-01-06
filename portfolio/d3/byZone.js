@@ -69,13 +69,14 @@ function initByZone() {
 
     byZone.svg.append('text')
         .attr("class", "chart-title")
-        .attr("transform", "translate(95, 20)")
+        .attr("transform", "translate(35, 20)")
         .text("Zones")
 
     byZone['update'] = updateZoneChart;
 
     return byZone;
 };
+
 
 function setZoneData(newData, dataSource) {
     this.coreData = newData;
@@ -153,134 +154,131 @@ function updateZoneChart(mode) {
     
     // get enter bar selection - situate at right end, zero size
     var newBars = bars.enter()
-            .append("rect")
-            .attr("class", "bar")
-            .attr("class", d => d.type)
-            .each(function(d) { d3.select(this).classed(d.zone, true) } )
-            .attr("x", svgWidth)
-            .attr("y", svgHeight - margin.bottom)
-            .attr("width", xScale.bandwidth());
+        .append("rect")
+        .attr("class", "bar")
+        .attr("class", d => d.type)
+        .each(function(d) { d3.select(this).classed(d.zone, true) } )
+        .attr("x", svgWidth)
+        .attr("y", svgHeight - margin.bottom)
+        .attr("width", xScale.bandwidth());
 
 
     var infoBtns = svg.selectAll("g.zone-info")
-            .data(chartData, d => d.zone)
-            .enter().append("g")
-                .attr("class", "zone-info");
+        .data(chartData, d => d.zone)
+        .enter().append("g")
+        .attr("class", "zone-info");
 
     infoBtns.append("rect")
-            .attr("x", d => xScale(d.zone) + margin.left + 2)
-            .attr("y", svgHeight - 10)
-            .transition("infoBtns-zone").delay(dur / 2)
-            .attr("width", xScale.bandwidth() - 4)
-            .attr("height", 20)
-            .attr("fill", "green");
+        .attr("x", d => xScale(d.zone) + margin.left + 2)
+        .attr("y", svgHeight - 10)
+        .transition("infoBtns-zone").delay(dur / 2)
+        .attr("width", xScale.bandwidth() - 4)
+        .attr("height", 20)
+        .attr("fill", "green");
 
     infoBtns.append("text")
-            .text("i") 
-            .attr("x", d => xScale(d.zone) + margin.left + xScale.bandwidth()/2)
-            .attr("y", svgHeight - 2)
-            .attr("font-size", 9)
-            .attr("font-family", "sans-serif")
-            .attr("cursor", "pointer")
-            .attr("fill", "white");
+        .text("i") 
+        .attr("x", d => xScale(d.zone) + margin.left + xScale.bandwidth()/2)
+        .attr("y", svgHeight - 2)
+        .attr("font-size", 9)
+        .attr("font-family", "sans-serif")
+        .attr("cursor", "pointer")
+        .attr("fill", "white");
 
     infoBtns.on("click", function(d) {
 
-                let zoneName = d.zone;
+        let zoneName = d.zone;
 
-                if (infoBtnActive == zoneName) {
-                    infoBtnActive = 'none';
-                    update(portfolio);
-                    return;
+        if (infoBtnActive == zoneName) {
+            infoBtnActive = 'none';
+            update(portfolio);
+            return;
+        };
+
+        infoBtnActive = zoneName;
+        // names of countries in the zone
+        let zoneCountryNames = zonesByCountry[d.zone];
+        // empty object to fill with zone country data (amts of each asset)
+        let zoneCountries = {};
+        // starting data to copy the subset from
+        let allCountries = portfolioDistributions.countries;
+
+        zoneCountryNames.forEach(function(d) {
+            let key = d.toUpperCase();
+            // copy across
+            if (Object.keys(allCountries).includes(key)) {
+            zoneCountries[key] = allCountries[key];
+            } else { console.log('cannot find', key, 'in portfolioDistributions') };
+        });
+
+        // update the country chart
+        byCountry.setData(zoneCountries,
+                          zoneLookup[d.zone] + " zone", maxColumns);
+        byCountry.update(mode);
+
+        // update the asset chart
+        // want in form like {stock: 150, bond: 53, gold: 25}
+        var zoneAssets = {};
+        for (var country in zoneCountries) {
+            for (var elem in zoneCountries[country]) {
+                if (elem == 'countrySum') { continue };
+                if (!Object.keys(zoneAssets).includes(elem)) {
+                    zoneAssets[elem] = 0;
                 };
+                zoneAssets[elem] += zoneCountries[country][elem];
+            };
+        };
 
-                infoBtnActive = zoneName;
-                // names of countries in the zone
-                let zoneCountryNames = zonesByCountry[d.zone];
-                // empty object to fill with zone country data (amts of each asset)
-                let zoneCountries = {};
-                // starting data to copy the subset from
-                let allCountries = portfolioDistributions.countries;
-
-                zoneCountryNames.forEach(function(d) {
-                    let key = d.toUpperCase();
-                    // copy across
-                    if (Object.keys(allCountries).includes(key)) {
-                    zoneCountries[key] = allCountries[key];
-                    } else { console.log('cannot find', key, 'in portfolioDistributions') };
-                });
-        
-                // update the country chart
-                byCountry.setData(zoneCountries,
-                                  zoneLookup[d.zone] + " zone", maxColumns);
-                byCountry.update(mode);
-
-                // update the asset chart
-                // want in form like {stock: 150, bond: 53, gold: 25}
-                var zoneAssets = {};
-                for (var country in zoneCountries) {
-                    for (var elem in zoneCountries[country]) {
-                        if (elem == 'countrySum') { continue };
-                        if (!Object.keys(zoneAssets).includes(elem)) {
-                            zoneAssets[elem] = 0;
-                        };
-                        zoneAssets[elem] += zoneCountries[country][elem];
-                    };
-                };
-        
-                byAsset.setData(zoneAssets);
-                byAsset.update(mode);
-
-
+        byAsset.setData(zoneAssets);
+        byAsset.update(mode);
     });
     
 
 
     newBars.on("mouseover", function(d) {
-                // don't know why need to pass the global variable here
-                // - mode is passed to the update function which this sits in.
-                // The key question!! presumably mode gets bound when function declared
-                // or something
-                mode = byZone.currentMode;
-                console.log('mode in mouseover', mode);
+        // need to pass the global variable here, as this assignment is 
+        // made only when update function is called - not each mouseover
+        // - mode is passed to the update function which this sits in.
+        // The key question!! presumably mode gets bound when function declared
+        // or something
+        mode = byZone.currentMode;
 
-                let boxSum = sumObj(mouseData[mode][d.zone]);
-                console.log('boxSum', boxSum);
-                var boxH = yScale(0) - yScale(boxSum);
-                console.log('boxSum', boxSum);
-                svg.append("rect")
-                      .attr("x", d3.select(this).attr("x") - 1)
-                      .attr("width", d3.select(this).attr("width") + 2)
-                      .attr("y", yScale(boxSum) - 1)
-                      .attr("height", boxH + 2)
-                      .attr("class", "tooltip")
-                      .attr("fill", "none")
-                      .attr("stroke", "black")
-                      .attr("stroke-width", "0px")
-                      .transition()
-                      .duration(300)
-                      .attr("stroke-width", "3px");
-                var ttList = makeProfile(d.zone, mouseData, mode);
-                for (i in ttList) {
-                    svg.append("text")
-                      .attr("x", 0.82*svgWidth).attr("y", margin.top + 5 + i*10)
-                      .attr("class", "tooltip")
-                      .text(ttList[i]) 
-                      .attr("fill-opacity", 0)
-                      .transition()
-                      .delay(200)
-                      .duration(800)
-                      .attr("fill-opacity", 1);
-                };
-
-
+        let boxSum = sumObj(mouseData[mode][d.zone]);
+        console.log('boxSum', boxSum);
+        var boxH = yScale(0) - yScale(boxSum);
+        console.log('boxSum', boxSum);
+        svg.append("rect")
+              .attr("x", d3.select(this).attr("x") - 1)
+              .attr("width", d3.select(this).attr("width") + 2)
+              .attr("y", yScale(boxSum) - 1)
+              .attr("height", boxH + 2)
+              .attr("class", "tooltip")
+              .attr("fill", "none")
+              .attr("stroke", "black")
+              .attr("stroke-width", "0px")
+              .transition()
+              .duration(300)
+              .attr("stroke-width", "3px");
+        var ttList = makeProfile(d.zone, mouseData, mode);
+        for (i in ttList) {
+            svg.append("text")
+              .attr("x", 0.72*svgWidth).attr("y", margin.top + 5 + i*10)
+              .attr("class", "tooltip")
+              .text(ttList[i]) 
+              .attr("fill-opacity", 0)
+              .transition()
+              .delay(200)
+              .duration(800)
+              .attr("fill-opacity", 1);
+        };
      });
 
     newBars.on("mouseout", function() {
-                d3.selectAll('.tooltip')
-                    .transition()
-                    .duration(200)
-                    .remove() } );
+        d3.selectAll('.tooltip')
+            .transition()
+            .duration(200)
+            .remove()
+    });
 
     // merge with update and transition all to new sizes
     newBars.merge(bars)

@@ -17,27 +17,27 @@ div {
   border-radius: 5px;
   border-width: 2px;
   padding: 5px;
-  height: 390px;
+  height: 790px;
   width: 740px;
 }
 
 
 #table-container {
   float: left;
-  height: 100%;
+  height: 400;
   width: 23%;
 }
 
 #chart-container {
   float: left;
-  height: 100%;
+  height: 55%;
   width: 66%;
 }
 
 #right-panel-container {
   float: left;
   width: 11%;
-  height: 100%;
+  height: 300;
   /* border-style: solid; */
   /* border-color: red; */
   /* border-width: 1px; */
@@ -69,20 +69,44 @@ div {
 }
 
 table {
-  overflow: auto;
-  max-height: 250px;
 }
 
 #input_table {
-  /* display: inline; */
   display: flex;
-  align: top;
+  overflow: auto;
+  max-height: 280px;
+  border-style: solid;
+  border-radius: 3px;
+  border-width: 1px;
+  border-color: grey;
+}
+
+#funds-table-container {
+  float: left;
+  height: 190px;
+  width: 740px;
+}
+
+#funds-table {
+  overflow: auto;
+  max-height: 180px;
+  display: inline-block;
+  table-layout: fixed;
+  width: 90%;
+  border-style: solid;
+  border-radius: 3px;
+  border-width: 1px;
+  border-color: grey;
+  font-size: 10px;
+}
+
+#funds-table td {
+  width: 25px;
 }
 
 #table-heading {
   max-width: 30px;
   display: inline;
-  font-size: 10px;
 }
 
 .barLabels {
@@ -95,6 +119,12 @@ table {
   display: inline;
 }
 
+.fundInTable {
+  font-family: Arial, sans-serif;
+  font-size: 10;
+  fill: steelBlue;
+}
+
 button {
   background-color: grey;
   cursor: pointer;
@@ -105,8 +135,21 @@ button {
   align: center;
   border-radius: 3px;
   margin: 3px;
-  width: 90%;
+  width: 95%;
   font-size: 10px;
+}
+
+#newFundInputPanel {
+  width=95%;
+}
+
+#addRow-btn {
+  width: 45%;
+}
+
+#newFundName {
+  float: left;
+  width: 35%;
 }
 
 .remove-btn {
@@ -166,12 +209,29 @@ input {
   padding: 10px;
 }
 
-.sum, .fee {
+#sum, #fee {
+  float: left;
   font-family: sans-serif;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: bold;
-  font-color: DarkGrey;
+  color: steelBlue;
+  padding-top: 10px;
+  padding-left: 10px;
   width: 100%;
+}
+
+#spacer {
+  height: 40px;
+  width: 100%;
+}
+
+.label {
+  float: left;
+  width: 30%;
+}
+
+#sum-amt, #fee-amt {
+  text-align: right;
 }
 
 .tooltip {
@@ -181,6 +241,69 @@ input {
   font-color: DarkGrey;
 }
 
-.zone-info {
-  height: 20;
+.fundTableTitle {
+  width: 6%;
+  float: left;
 }
+
+.fundSelector {
+  float:left;
+  height: 200;
+  font-family: sans-serif;
+  font-size: 10px;
+  font-weight: bold;
+  font-color: DarkGrey;
+}
+
+.feeFilter {
+  float: left;
+  width: 6%;
+}
+
+.assetFilter {
+  float: left;
+  width: 70px;
+}
+
+.assetFilterTitle, .assetFilterTitle {
+  float: left;
+  width: 100%;
+}
+
+#filterAsset, #filterFee {
+  width: 100%;
+}
+
+.zoneSelector {
+  float: left;
+  width: 35%;
+}
+
+#zoneTableTitle {
+  width: 50%;
+}
+
+#zoneColHeads {
+  width: 90%;
+}
+
+.zoneColHead {
+  width: 11%;
+  float: left;
+}
+
+.zoneCol {
+  min-width: 60px;
+  /* float: left; */
+}
+
+.countrySelector {
+  float: left;
+  width: 20%;
+}
+
+.areaType-selector {
+  float: left;
+  width: 20%;
+}
+

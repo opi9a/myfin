@@ -25,6 +25,7 @@ function initByAsset() {
         initAssets: [{asset: 'bond', value: 1},
                      {asset: 'stock', value: 1},
                      {asset: 'gold', value: 1},
+                     {asset: 'cash', value: 1},
         ],
     }
 
@@ -44,7 +45,7 @@ function initByAsset() {
 
     byAsset['svg'].append("text")
                     .attr("class", "chart-title")
-                    .attr("transform", "translate(-20, -80)")
+                    .attr("transform", "translate(-35, -80)")
                     .text("Assets");
 
     var pie = d3.pie().value(d => d.value).sort(null);
@@ -73,7 +74,7 @@ function initByAsset() {
 function setAssetData(newData) {
 
     filledData = {};
-    allAssets = ['bond', 'stock', 'gold']; 
+    allAssets = ['bond', 'stock', 'gold', 'cash']; 
 
     for (i in allAssets) {
         filledData[allAssets[i]] = newData[allAssets[i]] || 0;

@@ -4,25 +4,32 @@ const dur = 1500,
       f0 = d3.format(".0f"),
       f2 = d3.format(".2f"),
       // minBarH = 15,
-      maxColumns = 16;
+      maxColumns = 16,
+      zonesList = ['uk', 'nn', 'eu', 'na', 'la', 'cn', 'as', 'pc', 'em'] ;
 
 // load external data
 var funds = getFunds(),
     colors = makeColors(),
     zoneLookup = makeZoneLookup();
 
+funds['CASH'] = {
+    countries: { GBR: 100 },
+    zones: { uk: 100 },
+    'fee_%': 0,
+    type: 'cash',
+};
+
+
 // set up input table and buttons
-var inputTable = d3.select('#input_table'),
+var inputTable = d3.select('#input_table tbody'),
     inputRows = d3.selectAll('.fundAmt'),
-    addRowBtn = d3.select('#addRow-btn').on("click", function() { addFundRow() }),
+    addRowBtn = d3.select('#addRow-btn').on("click", function() {
+        var fundName = d3.select('#newFundName').property('value');
+        addFundRow(fundName);
+    }),
+    fundAddedBtn = d3.selectAll('.fundAdded-btn'),
     updateBtn = d3.select('#update-btn'),
-    removeBtns = d3.selectAll('.remove-btn')
-                   .on('click', function() {
-                       this.parentNode.parentNode.remove();
-                       portfolio = parseInputTable();
-                       setTimeout(update(portfolio,
-                                'Whole portfolio', funds), 1500);
-                   }),
+    removeBtns = d3.selectAll('.remove-btn'),
     infoBtns = d3.selectAll('.info-btn'),
     modeBtn = d3.selectAll('input[name="mode"]');
 
@@ -39,7 +46,12 @@ var portfolio = parseInputTable();
 update(portfolio, 'Whole portfolio', funds);
 
 
+// fund table sorting and selection
+var assetSelectionBtn = d3.select('#assetSelection')
+
+
 // ACTIONS
+
 
 updateBtn.on('click', function() {
     portfolio = parseInputTable();
@@ -56,8 +68,39 @@ modeBtn.on("change", function() {
 });
 
 var infoBtnActive = 'none';
-infoBtns.on("click", function() {
-    let fundName = d3.select(this).attr("data-fund");
+
+infoBtns.on("click", function() { showInfo(this); });
+inputTable.on("change", function() { changedInputs() });
+removeBtns.on('click', function() { removeRow(this); });
+
+
+// FUNCTION DEFINITIONS
+
+function changedInputs() {
+    console.log('changed table');
+
+    newPortfolio = parseInputTable();
+
+    if (hasChanged([newPortfolio, portfolio])) {
+        console.log('changed values');
+        portfolio = clone(newPortfolio);
+        setTimeout(update(portfolio, 'Whole portfolio', funds), 1500);
+    }
+    else {console.log('not changed values') };
+};
+
+
+function removeRow(input) {
+    input.parentNode.parentNode.remove();
+    portfolio = parseInputTable();
+    update(portfolio, 'Whole portfolio', funds);
+};
+
+
+function showInfo(input) {
+
+    let fundName = d3.select(input).attr("data-fund");
+    console.log('fundName in showInfo', fundName);
 
     if (infoBtnActive == fundName) {
         infoBtnActive = 'none';
@@ -67,27 +110,15 @@ infoBtns.on("click", function() {
     infoBtnActive = fundName;
 
     let singlePortfolio = { [fundName]: portfolio[fundName] };
+    console.log('singlePortfolio in showinfo', singlePortfolio);
 
     update(singlePortfolio, fundName + " fund only", funds);
-});
+};
 
-
-inputTable.on("change", function() {
-    console.log('changed table');
-
-    newPortfolio = parseInputTable();
-
-    if (hasChanged([newPortfolio, portfolio])) {
-        console.log('changed values');
-    } else {console.log('not changed values') };
-    setTimeout(update(newPortfolio, 'Whole portfolio', funds), 1500);
-});
-
-
-// FUNCTION DEFINITIONS
 
 function update(portfolio, dataSource, funds) {
 
+    console.log('portfolio passed to update', portfolio);
     portfolioDistributions = getPortfolioDistribution(portfolio, funds);
 
     byCountry.setData(portfolioDistributions.countries, dataSource, maxColumns);
@@ -100,60 +131,63 @@ function update(portfolio, dataSource, funds) {
     byAsset.setData(portfolioDistributions.assets);
     byAsset.update(mode);
 
-    pfSum = d3.select('#table-container').selectAll('div.sum')
+    pfSum = d3.selectAll('#sum').selectAll('div.amt')
         .data([sumObj(portfolio)]);
     pfSum.enter()
         .append('div')
-        .attr('style', 'float: left')
-        .attr('class', 'sum')
-        .text(d => 'sum:  ' + d);
+        .attr('class', 'amt')
+        .text(d => d);
     pfSum
-        .text(d => 'sum:  ' + d);
+        .text(d => d);
 
-    pfFee = d3.select('#table-container').selectAll('div.fee')
+    pfFee = d3.select('#fee').selectAll('div.amt')
         .data([portfolioDistributions.fee]);
     pfFee.enter()
         .append('div')
-        .attr('style', 'float: left')
-        .attr('class', 'fee')
-        .text(d => 'fee:  ' + f2(d) + " %");
+        .attr('class', 'amt')
+        .text(d => f2(d) + "%");
     pfFee
-        .text(d => 'fee:  ' + f2(d) + " %");
+        .text(d => f2(d) + "%");
 };
 
 
-function removeRow(input) {
-    input.remove();
-};
-
-
-function addFundRow() {
+function addFundRow(newFundName='None') {
     fundRow = inputTable.append('tr');
     fundRow.append('td').append('input')
                 .attr('type', 'text')
-                .attr('value', '?')
+                .attr('value', newFundName)
                 .attr('class', 'fund_row fundName');
 
     fundRow.append('td').append('input')
                 .attr('type', 'number')
-                .attr('value', 0)
+                .attr('value', 1)
                 .attr('class', 'fund_row fundAmt');
 
     fundRow.append('td').append('button')
                 .text('x')
                 .attr('class', 'remove-btn');
 
+    fundRow.append('td').append('button')
+                .text('I')
+                .attr('class', 'info-btn')
+                .attr('data-fund', newFundName);
 
-    // think I have to repeat this now
-    removeBtns = d3.selectAll('.remove-btn')
-    removeBtns.on('click', function() { this.parentNode
-                                            .parentNode.remove() });
+    // have to re assign these, as row not there when originally declared
+    
+    infoBtns = d3.selectAll('.info-btn');
+    infoBtns.on("click", function() { showInfo(this); });
+    removeBtns = d3.selectAll('.remove-btn');
+    removeBtns.on('click', function() { removeRow(this); });
+
+    portfolio = parseInputTable();
+    update(portfolio, 'Whole portfolio', funds);
+    changedInputs();
+
 };
 
 
 
 function parseInputTable() {
-
 
     var fundSet = Object.keys(funds);
     var out = {};
@@ -199,6 +233,7 @@ function getPortfolioDistribution(portfolio, funds) {
     for (var fund in portfolio) {
 
         // get type of asset
+        console.log('fund', fund);
         var assetType = funds[fund].type;
 
         // add to total for that asset type, initialising if reqd
@@ -370,7 +405,7 @@ function makeColors() {
     
     colors['NoN'] = 'gold';
     colors['GBR'] = 'darkRed';
-    colors['uk'] = 'darkRed';
+    // colors['uk'] = 'darkRed';
     colors['na'] = colors.USA;
     colors['cn'] = colors.CHN;
     colors['nn'] = colors.NoN;
@@ -380,6 +415,7 @@ function makeColors() {
     colors['em'] = colors.IND;
     colors['pc'] = colors.RUS;
     colors['bond'] = 'steelBlue';
+    colors['cash'] = 'lightgrey';
     colors['stock'] = 'steelBlue';
     colors['gold'] = 'gold';
 
@@ -485,9 +521,9 @@ function flatten(areas, areaType) {
             var row = {};
             row[areaType] = area;
             row['type'] = asset;
-            row['start'] = f(lastEnd);
+            row['start'] = lastEnd;
             var amt = areas[area][asset];
-            row['end'] = f(lastEnd + amt);
+            row['end'] = lastEnd + amt;
             out.push(row);
             lastEnd += amt;
         });
@@ -581,20 +617,28 @@ function makeProfile(area, areaData, mode) {
 
 
 function sumObj(inObj) {
+    // return the sum of an object's values
     return d3.sum(Object.values(inObj));
 };
 
 
-function sumAssets(portfolio) {
+function sumAssets(areas) {
+    // return an object with the sums (across areas) of all asset types
+    // in the input portfolio
+    // input must be an area object, eg {USA: { bond: 22, stock: 33 },
+    //                                   GBR: { bond: 2, stock: 3 } }
+    //  returns { bond: 24, stock: 36 }
+    //  I THINK!  writing this comment ex post
+    
     assetTypes = {};
 
-    for (area in portfolio) {
-        for (asset in portfolio[area]) {
+    for (area in areas) {
+        for (asset in areas[area]) {
             if (!(Object.keys(assetTypes).includes(asset))) {
                 assetTypes[asset] = 0;
             };
 
-            assetTypes[asset] += portfolio[area][asset];
+            assetTypes[asset] += areas[area][asset];
         };
     };
 
@@ -657,6 +701,7 @@ function getPercents(chartArray) {
 
 
 function getCountrySummary(acc, elem) {
+    // used in reduce function to make output for mouseover I think
 
     if (!Object.keys(acc).includes(elem.country)) {
         acc[elem.country] = {};
@@ -669,6 +714,7 @@ function getCountrySummary(acc, elem) {
 
 
 function getZoneSummary(acc, elem) {
+    // used in reduce function to make output for mouseover I think
 
     if (!Object.keys(acc).includes(elem.zone)) {
         acc[elem.zone] = {};
@@ -678,4 +724,215 @@ function getZoneSummary(acc, elem) {
 
     return acc;
 };
+
+
+function makeFundsArray(obj) {
+    // turn an object of funds into an array
+    // eg { AGBP: { countries: {..}, }, H50E: {..} }
+    // to [ {ticker: AGBP, countries: {..}, .. },
+    //      {ticker: H50E, countries: {..}, .. }, ..]
+    //
+    //  usually do this in order to then sort the array, eg using 
+    //  compareFunds()
+    
+	outArray = [];
+
+	for (let row in obj) {
+		let newRow = {};
+        newRow['ticker'] = row;
+			for (let elem in obj[row]) {
+				newRow[[elem]] = clone(obj[row][elem]);
+			};
+	outArray.push(newRow);
+	};
+
+    return outArray;
+};
+
+
+function compareFunds(a, b, comparatorField, comparatorValue, ascending=false) {
+    // use to sort fund array
+    // eg fundsArray.sort((a,b) => compareFunds(a, b, 'countries', 'SWE'))
+    // console.log('a', a);
+    // console.log('b', b);
+    // console.log('comparatorField', comparatorField);
+    // console.log('comparatorValue', comparatorValue);
+    // console.log('b[[comparatorField]]', b[[comparatorField]]);
+    if (ascending) {
+        return (a[[comparatorField]][[comparatorValue]] || 0)
+             - (b[[comparatorField]][[comparatorValue]] || 0);
+    };
+    return (b[[comparatorField]][[comparatorValue]] || 0)
+         - (a[[comparatorField]][[comparatorValue]] || 0);
+};
+
+
+fundsArray = makeFundsArray(funds);
+
+testFundsArray = fundsArray.slice(0, 4);
+
+var fundFilter = {
+    asset: 'all',
+    max_fee: 1,
+    areaType: 'None',
+    area: 'None'
+};
+
+// making the full funds table
+
+makeFundsTable('None', fundsArray);
+
+function filterFunds(tableArray) {
+
+    filteredArray = tableArray.filter(a => {
+
+        var feeOK = (a['fee_%'] || 1) <= fundFilter.max_fee;
+
+        var typeOK = (fundFilter.asset === a['type'])
+                     || (fundFilter.asset === 'all');
+
+        // var allAreas = (fundFilter.areaType === 'None'
+        //                 || fundFilter.area === 'None')
+
+        // var areaOK = !!(allAreas || a[fundFilter.areaType][fundFilter.area]);
+
+        // if (a.ticker === 'AGBP') {
+        //     console.log(a);
+        //     console.log('fee', feeOK, 'typeOK', typeOK, 'areaOK', areaOK);
+        //     console.log('overall', feeOK & typeOK & !!areaOK);
+        // };
+        return feeOK & typeOK; // & areaOK;
+    });
+
+    // assign a flag for if selected area has anything in it (for display or not)
+    filteredArray.forEach(fund => {
+
+        var allAreas = (fundFilter.areaType === 'None'
+                        || fundFilter.area === 'None')
+
+        var areaOK = !!(allAreas || fund[fundFilter.areaType][fundFilter.area]);
+
+        if (areaOK) {
+            fund['areaOK'] = true;
+        } else fund['areaOK'] = false;
+    });
+
+    return filteredArray;
+};
+
+
+function makeFundsTable() {
+    // fundFilter is an object with an areaType (eg 'country') and 
+    //  - currently a global object
+    // an area (eg 'USA')
+
+    console.log('passed fundFilter in makeFundsArray', fundFilter);
+
+    filteredFundsArray = filterFunds(fundsArray);
+
+    console.log('filteredFundsArray', filteredFundsArray);
+
+    if (fundFilter.areaType !== 'None') {
+        var sortedFundsArray = filteredFundsArray.sort((a, b) =>
+                compareFunds(a, b, fundFilter.areaType, fundFilter.area)); 
+        console.log('sortedFundsArray', sortedFundsArray);
+    } else {
+        sortedFundsArray = filteredFundsArray.sort((a,b) => {
+            af = a['fee_%'] || 1;
+            bf = b['fee_%'] || 1;
+            return af - bf;
+        })
+    };
+
+    d3.select('#funds-table').selectAll('tr.fundInTable').remove()
+
+    var fundTableRows = d3.select('#funds-table').selectAll('tr.fundInTable')
+        .data(sortedFundsArray)
+        .enter()
+        .append('tr')
+        .attr('class', 'fundInTable')
+        .style('color', function(d) {
+            if (!d.areaOK) { return 'grey' };
+        });
+
+    fundTableRows.append('td').text(d=> d.ticker)
+                              .attr('class', 'tickerName');
+    fundTableRows.append('button').text('+')
+                    .attr('class', 'addFund');
+    fundTableRows.append('td').text(d=> d['fee_%']);
+    fundTableRows.append('td').text(d=> d.type)
+                              .attr('class', 'zoneCol');
+
+    zonesList.forEach(zone => {
+        fundTableRows.append('td')
+            .text(d=> f0(d.zones[zone]))
+            .style('color', function() {
+                if (zone === fundFilter.area) { return 'red' }
+            });
+    });
+
+    for (var i=0; i<3; i++) {
+        let countries = fundTableRows.datum().countries;
+        console.log('fundTableRows data', countries);
+        fundTableRows.append('td')
+            .text(function(d) {
+                let key = Object.keys(d.countries)[i] || '--';
+                let val = d.countries[key] || 0;
+                return key + " " + (val ? f0(val) :  '--');
+            })
+        
+            .style('color', function(d) {
+                if (Object.keys(d.countries)[i] === fundFilter.area) {
+                    return 'red'
+                };
+            });
+    };
+
+    if (fundFilter.areaType === 'countries') {
+        fundTableRows.append('td').text(d=> d.countries[fundFilter.area])
+                                  .style('color', 'red');
+    };
+
+    d3.selectAll('.addFund').on("click", function() {
+        var fundName = d3.select(this.parentNode)
+                         .select('.tickerName').text();
+        console.log('this value', fundName);
+        addFundRow(newFundName=fundName);
+    })
+};
+
+d3.select('#filterFee').on("change", function() {
+    var filterFee = this.value;
+    console.log('filtering Fee', filterFee);
+    fundFilter.max_fee = filterFee;
+    makeFundsTable();
+});
+
+d3.select('#filterAsset').on("change", function() {
+    var filterAsset = this.value;
+    console.log('filtering asset', filterAsset);
+    fundFilter.asset = filterAsset;
+    makeFundsTable();
+});
+
+d3.select('.countrySelection').on("change", function() {
+    var newArea = this.value;
+    console.log('this value', newArea);
+    fundFilter.areaType = 'countries';
+    fundFilter.area = newArea.toUpperCase();
+    d3.selectAll('.zoneColHead').style('color', 'black');
+    makeFundsTable();
+});
+
+d3.selectAll('.zoneColHead').on("click", function() {
+    var newArea = this.innerHTML;
+    console.log('this value', newArea);
+    console.log('this ', this);
+    fundFilter.areaType = 'zones';
+    fundFilter.area = newArea.toLowerCase();
+    d3.selectAll('.zoneColHead').style('color', 'black');
+    this.style.color = 'red';
+    d3.select('input.countrySelection').property('value', '');
+    makeFundsTable();
+});
 

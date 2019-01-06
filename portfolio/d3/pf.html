@@ -7,8 +7,12 @@
 <body>
   <div class='container' id='outer'>
     <div class='container' id='table-container'>
-      <button id='addRow-btn'>add row</button>
+      <div id='newFundInputPanel'>
+        <button id='addRow-btn'>add Fund:</button>
+        <input type="text" id="newFundName">
+      </div>
       <table id='input_table'>
+        <tbody>
         <tr>
           <th class='table-heading'>Fund</th>
           <th class='table-heading'>Amount</th>
@@ -38,57 +42,70 @@
           <td><button class="remove-btn">x</button></td>
           <td><button class="info-btn" data-fund="IGLN"">I</button></td>
         </tr>
-        <tr>
-          <td><input type="text" value="PHAU" class="fund_row fundName"></td>
-          <td><input type="number" value="2" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="PHAU"">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="XDJP" class="fund_row fundName"></td>
-          <td><input type="number" value="15" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="XDJP"">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="XDUS" class="fund_row fundName"></td>
-          <td><input type="number" value="10" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="XDUS"">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="XDDX" class="fund_row fundName"></td>
-          <td><input type="number" value="6" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="XDDX">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="UC93" class="fund_row fundName"></td>
-          <td><input type="number" value="4" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="UC93">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="EMIM" class="fund_row fundName"></td>
-          <td><input type="number" value="20" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="EMIM"">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="GILI" class="fund_row fundName"></td>
-          <td><input type="number" value="0" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="GILI"">I</button></td>
-        </tr>
-        <tr>
-          <td><input type="text" value="VEVE" class="fund_row fundName"></td>
-          <td><input type="number" value="72" class="fund_row fundAmt"></td>
-          <td><button class="remove-btn">x</button></td>
-          <td><button class="info-btn" data-fund="VEVE"">I</button></td>
-        </tr>
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="PHAU" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="2" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="PHAU"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="XDJP" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="15" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="XDJP"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="XDUS" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="10" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="XDUS"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="XDDX" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="6" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="XDDX">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="UC93" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="4" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="UC93">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="EMIM" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="20" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="EMIM"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="IBGX" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="52" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="IBGX"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="GSK" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="71" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="GSK"">I</button></td> -->
+        <!-- </tr> -->
+        <!-- <tr> -->
+        <!--   <td><input type="text" value="CASH" class="fund_row fundName"></td> -->
+        <!--   <td><input type="number" value="30" class="fund_row fundAmt"></td> -->
+        <!--   <td><button class="remove-btn">x</button></td> -->
+        <!--   <td><button class="info-btn" data-fund="CASH"">I</button></td> -->
+        <!-- </tr> -->
 
+      </tbody>
       </table>
-      <button id='update-btn'>show portfolio</button>
+      <button id='update-btn'>chart whole portfolio</button>
+      <div id='sum'>
+            <div class='label'>sum:</div>
+      </div>
+      <div id='fee'>
+            <div class='label'>fee:</div>
+      </div>
     </div>
     <div class='container' id='chart-container'>
       <div id='chart1'></div>
@@ -103,9 +120,55 @@
 					<input type="radio" name="mode" value="actual">actual
 			</form>
     </div>
-  </div>
 
-<body>
+  <div class="fundSelector">
+    <div class="fundTableTitle">Fund</div>
+
+    <div class="feeFilter">
+      <div class="fundTableTitle feeFilterTitle">fee</div>
+      <input type="number" step="0.1" value="0.5" id="filterFee">
+    </div>
+
+    <div class="assetFilter">
+      <div class="fundTableTitle assetFilterTitle">asset:</div>
+      <!-- <input type="text" value="all" id="filterAsset"> -->
+        <select id="filterAsset">
+          <option>all</option>
+          <option>stock</option>
+          <option>bond</option>
+          <option>gold</option>
+          <option>sector</option>
+          <option>commodity</option>
+          <option>other</option>
+          <option>unknown</option>
+        </select>
+
+    </div>
+
+    <div class="zoneSelector">
+      <div id="zoneTableTitle">zone</div>
+        <div id="zoneColHeads">
+          <div class="zoneColHead">UK</div>
+          <div class="zoneColHead">NN</div>
+          <div class="zoneColHead">EU</div>
+          <div class="zoneColHead">NA</div>
+          <div class="zoneColHead">LA</div>
+          <div class="zoneColHead">CN</div>
+          <div class="zoneColHead">AS</div>
+          <div class="zoneColHead">PC</div>
+          <div class="zoneColHead">EM</div>
+        </div>
+    </div>
+    <div class="countrySelector">
+      <div class="countryTableTitle">country</div>
+      <input type="text" value="" class="countrySelection">
+  </div>
+  <div class='container' id='funds-table-container'>
+    <table id='funds-table'>
+    </table>
+  </div>
+</div>
+
 <script src="d3.min.js"></script>
 <script src="funds.js"></script>
 <script src="zoneMap.json"></script>
