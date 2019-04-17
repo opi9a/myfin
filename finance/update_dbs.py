@@ -13,12 +13,14 @@ def new_updater(unknowns_db_path='unknowns_db.csv',
                 cat_db_path='cat_db.csv',
                 tx_db_path='tx_db.csv',
                 fuzzy_db_path='fuzzy_db.csv',
-                return_dbs=False):
+                return_dbs=False,
+                write_out_dbs=True):
 
-    tx_db = pd.read_csv(tx_db_path, index_col='date')
+
+    tx_db       = pd.read_csv(tx_db_path, index_col='date')
     unknowns_db = pd.read_csv(unknowns_db_path, index_col='_item')
-    cat_db = pd.read_csv(cat_db_path, index_col='_item')
-    fuzzy_db = pd.read_csv(fuzzy_db_path, index_col='_item')
+    cat_db      = pd.read_csv(cat_db_path, index_col='_item')
+    fuzzy_db    = pd.read_csv(fuzzy_db_path, index_col='_item')
 
     tx_by_tup = (tx_db.copy().reset_index()
                              .set_index(['_item', 'accX']).sort_index())
@@ -62,9 +64,6 @@ def new_updater(unknowns_db_path='unknowns_db.csv',
 
     # get the tuples to change
     tuples_to_change = fz_by_tup.index[fz_by_tup['status'] == 'rejected']
-    print('\nfuzzy reject')
-    print('\nfuzzy by tuple\n', fz_by_tup)
-    print('tuples to change', tuple(tuples_to_change))
 
     # overwrite tx_db rows with 'unknown' - NB exclude 'mode'='manual'
     mask = ((tx_by_tup.index.isin(tuples_to_change)) &
@@ -77,8 +76,8 @@ def new_updater(unknowns_db_path='unknowns_db.csv',
     appendee = pd.DataFrame(index=tuples_to_change)
     appendee['accY'] = 'unknown'
     un_by_tup = un_by_tup.append(appendee)
-    unknowns_db = un_by_tup.reset_index().set_index('_item')
-    unknowns_db = unknowns_db.drop_duplicates()
+    un_by_tup = un_by_tup.reset_index().drop_duplicates()
+    unknowns_db = un_by_tup.set_index('_item')
 
     # delete from fuzzy_db
     fz_by_tup = fz_by_tup.drop(tuples_to_change)
@@ -94,17 +93,18 @@ def new_updater(unknowns_db_path='unknowns_db.csv',
     # append to cat_db
     appendee = pd.DataFrame(fz_by_tup.loc[tuples_to_change, 'accY'])
     ca_by_tup = ca_by_tup.append([appendee])
-    cat_db = ca_by_tup.reset_index().set_index('_item')
-    cat_db = cat_db.drop_duplicates()
+    cat_db = ca_by_tup.reset_index().drop_duplicates()
+    cat_db = cat_db.set_index('_item')
 
     # delete from fuzzy_db
     fz_by_tup = fz_by_tup.drop(tuples_to_change)
     fuzzy_db = fz_by_tup.reset_index().set_index('_item')
 
-    tx_db.to_csv(tx_db_path)
-    unknowns_db.to_csv(unknowns_db_path)
-    cat_db.to_csv(cat_db_path)
-    fuzzy_db.to_csv(fuzzy_db_path)
+    if write_out_dbs:
+        tx_db.to_csv(tx_db_path)
+        unknowns_db.to_csv(unknowns_db_path)
+        cat_db.to_csv(cat_db_path)
+        fuzzy_db.to_csv(fuzzy_db_path)
 
     if return_dbs:
         return dict(tx_db=tx_db, cat_db=cat_db,

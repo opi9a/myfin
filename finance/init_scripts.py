@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
 from shutil import copyfile, rmtree
 from datetime import datetime as dt
 
@@ -121,10 +122,14 @@ def xmake_targets(seed_df_path, return_seed=False):
     mask3 = (seed['update_action'] == 'rejected')
     mask = mask1 | mask2 | mask3
 
+    print('in xchanges with unknowns')
+    print('seed.loc[mask]', seed.loc[mask, ['_item', 'accX']])
+
     df = seed.loc[mask, ['_item', 'accX']]
     df = df.reset_index(drop=True).set_index('_item')
     df['accY'] = 'unknown'
     out['updated']['unknowns_db'] = tidy(df)
+    print(tidy(df))
 
 
     # fuzzy:
@@ -330,7 +335,9 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
     if return_df: return df
 
 
-def initialise_project(proj_name, overwrite_existing=False, cat_db_to_import=None):
+def initialise_project(proj_name, overwrite_existing=False,
+                       parent_dir=None,
+                       cat_db_to_import=None):
 
     """Required structure:
 
@@ -350,8 +357,9 @@ def initialise_project(proj_name, overwrite_existing=False, cat_db_to_import=Non
     loglist = []
 
     # start from wherever called and make a directory with proj_name
-    init_dir = os.getcwd()
-    print('\ninitialising project, dir is:', init_dir)
+    if parent_dir is None:
+        parent_dir = os.getcwd()
+    print('\ninitialising project in dir:', parent_dir)
     if not os.path.exists(proj_name):
         print('trying to create', proj_name)
         os.mkdir(proj_name)
@@ -406,7 +414,7 @@ def initialise_project(proj_name, overwrite_existing=False, cat_db_to_import=Non
     # write out log
     writelog(loglist)
 
-    os.chdir(init_dir)
+    os.chdir(parent_dir)
 
     return os.path.abspath(proj_name)
 

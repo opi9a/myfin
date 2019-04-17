@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import os
+from os import chdir
+from pathlib import Path
 from pprint import pprint
 from fuzzywuzzy import fuzz, process
 
@@ -34,11 +36,202 @@ from csv files:
 
 """
 
-def load_new(seed_df=None, targets=None):
+def load_new(main_dir=Path().cwd()):
+    """
+    Main sequence for loading new txs.
+    I think everything else either testing or obsolete.
+    Sequence broken into functions, not for reuse but to aid
+    structural transparency.
+
+    Returns a df but does all its work on disk anyway.
+    """
+
+    main_dir = Path(main_dir).absolute()
+
+    # load the dbs
+    unknowns_db, tx_db, fuzzy_db, cat_db = get_dbs(main_dir)
+
+    for acc_path in (main_dir / 'tx_accounts').iterdir():
+
+        new_txs_files = list((acc_path / 'new_txs').iterdir())
+
+        if new_txs_files:
+
+            # prep the files
+            execute_prep_script(acc_path.absolute())
+
+            # make and process the tx df
+            df = pd.concat([pd.read_csv(x) for x in new_txs_files])
+            df = apply_parser(df, acc_path)
+            df = trim_df(df, acc_path)
+            df = add_target_acc_col(df, acc_path, unknowns_db, fuzzy_db, cat_db)
+
+            # check for discontinuity and duplication
+            df_check = check_df(df, acc_path)
+
+            # update the dbs
+            fuzzy_db    = update_fuzzies(df, fuzzy_db)
+            unknowns_db = update_unknowns(df, unknowns_db)
+            tx_db       = update_tx_db(df, tx_db)
+
+    # save dbs to disc
+    tx_db.to_csv('tx_db.csv') # need dateformat?
+    fuzzy_db.to_csv('fuzzy_db.csv')
+    unknowns_db.to_csv('unknowns_db.csv')
+
+    return df
+
+
+def trim_df(df, acc_path):
+
+    # load previous txs for this account
+    prev_txs_df = pd.read_csv(acc_path / 'prev_txs.csv',
+                              parse_dates=['date'],
+                              dayfirst=True, index_col='date')
+
+    if len(prev_txs_df) == 0:
+        return df.copy()
+
+    df = df.reset_index()
+    print('in trim, df\n', prev_txs_df.reset_index())
+    last_tx_of_prev = tuple(prev_txs_df.reset_index().iloc[-1])
+    match_index = -1
+    df_tuples = [tuple(y) for y in df.values]
+    for i, x in enumerate(df_tuples):
+        if x == last_tx_of_prev:
+            match_index = i
+    if match_index != -1:
+        trimmed_df = new_txs_df.iloc[(match_index + 1):].copy()
+    else:
+        trimmed_df = new_txs_df.copy()
+
+    parser = pd.read_pickle(acc_path / 'parser.pkl')
+
+    trimmed_df.to_csv('prev_txs.csv', mode='a', header=False,
+                                date_format=parser['date_format'])
+    return trimmed_df
+
+
+
+def add_target_acc_col(df, acc_path, unknowns_db, fuzzy_db, cat_db):
+    """
+    Get target account assignments (categories)
+    """
+    accYs = assign_targets(df._item, acc_path.name,
+                                unknowns_db=unknowns_db,
+                                fuzzy_db=fuzzy_db,
+                                cat_db=cat_db,
+                               )
+
+    # make a df with accY, accY and mode columns
+    df['accX'] = acc_path.name
+    df['accY'] = [x[0] for x in accYs]
+    df['mode'] = [x[1] for x in accYs]
+
+    return df
+
+
+def update_fuzzies(df, fuzzy_db):
+    """
+    Get any fuzzy matches and update the fuzzy_db
+    """
+    new_fuzzies = (df.loc[df['mode'] == 'new fuzzy']
+                     .set_index('_item', drop=True))
+    new_fuzzies['status'] = 'unconfirmed'
+    new_fuzzies = new_fuzzies[fuzzy_db.columns]
+
+    return tidy(fuzzy_db.append(new_fuzzies))
+
+
+def update_unknowns(df, unknowns_db):
+    """
+    Get any new unknowns and update the unknowns_db
+    """
+    new_unknowns = (df.loc[df['mode'] == 'new unknown']
+                     .set_index('_item', drop=True))
+    unknowns_db = unknowns_db.append(new_unknowns[unknowns_db.columns])
+
+    return tidy(unknowns_db)
+
+
+def update_tx_db(df, tx_db):
+    """
+    Get any new unknowns and update the unknowns_db
+    """
+    max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
+
+    df['id'] = np.arange(max_current + 1,
+                         max_current + 1 + len(df)).astype(int)
+
+    return tx_db.append(df[tx_db.columns])
+
+
+def check_df(df, acc_path):
+
+    if balance_continuum(df).sum():
+        print('WARNING:', acc_path.name, 'has a balance discontinuity')
+        print(balance_continuum(df))
+        return 1
+
+    if df.duplicated().values.sum():
+        print('WARNING:', acc_path.namec, 'has duplicated values')
+        return 1
+
+    return 0
+
+
+def apply_parser(df, acc_path):
+    """
+    Applies the passed parser to the passed df, to regularise the column names.
+    Returns a df with regular columns.
+    """
+    parser = pd.read_pickle(acc_path / 'parser.pkl')
+    df = format_new_txs(df, account_name=acc_path.name, parser=parser)
+    return df.sort_values('date')
+
+def get_dbs(dir_path=None):
+
+    if dir_path is None:
+        dir_path = Path('.')
+
+    unknowns_db = pd.read_csv(dir_path / 'unknowns_db.csv', index_col='_item')
+    tx_db       = pd.read_csv(dir_path / 'tx_db.csv', index_col='date')
+    fuzzy_db    = pd.read_csv(dir_path / 'fuzzy_db.csv', index_col='_item')
+    cat_db      = pd.read_csv(dir_path / 'cat_db.csv', index_col='_item')
+
+    return unknowns_db, tx_db, fuzzy_db, cat_db
+
+
+def execute_prep_script(dir_path):
+    prep_script_path = dir_path / 'prep.py'
+    print('prep_script_path', prep_script_path)
+    if prep_script_path.exists():
+        # need to move to directory as can't pass a path to the prep.py script
+        pwd = Path.cwd()
+        chdir(dir_path)
+        # print('contents of prep.py\n', open(prep_script_path).read())
+        exec(open(prep_script_path).read())
+        chdir(pwd)
+
+##############################################################################
+
+def load_new_test(seed_df=None, targets=None, main_dir=None):
+    """
+    test sequence supposed to mirror load_new but with prints
+    and asserts
+
+    really needs refactoring to more closely mirror load_new
+    """
 
     test = False
     if seed_df is not None and targets is not None:
         test = True
+
+    if main_dir is None:
+        main_dir = Path('.')
+
+    else:
+        main_dir = Path(main_dir)
 
     # begin with a test folder structure, as generated by populate_test_project,
     # and the seed df that was used to populate it
@@ -53,11 +246,7 @@ def load_new(seed_df=None, targets=None):
     #-------------------------------------------------------------------------
     _prtitle('-- 0.2 reading in the db csvs')
 
-    unknowns_db = pd.read_csv('unknowns_db.csv', index_col='_item')
-    tx_db = pd.read_csv('tx_db.csv', index_col='date')
-    fuzzy_db = pd.read_csv('fuzzy_db.csv', index_col='_item')
-    cat_db = pd.read_csv('cat_db.csv', index_col='_item')
-
+    unknowns_db, tx_db, fuzzy_db, cat_db = get_dbs(main_dir)
 
     #-------------------------------------------------------------------------
     _prtitle('-- 1. PROCESS ANY NEW TRANSACTIONS IN TX_ACCOUNTS FILE STRUCTURE')
@@ -258,7 +447,7 @@ def load_new(seed_df=None, targets=None):
         _compare('loaded', 'unknowns_db', unknowns_db)
 
 
-#-------------------------------------------------------------------------
+##############################################################################
 
 def main(new_tx_paths, account_name, parser,
          tx_db_path    = 'tx_db.csv',
@@ -534,6 +723,9 @@ def pick_match(item, account, hits, return_col='accY'):
 #------------------------------------------------------------------------------
 
 def trim_overlap(prev_txs_df, new_txs_df):
+    """
+    Obsolete now
+    """
     # get last tx of prev
     # get last date of prev
     # if not in dates in new then return

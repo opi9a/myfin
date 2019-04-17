@@ -1,18 +1,20 @@
+# ~/shared/projects/myfin/testing/test_finance.py
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
 from shutil import rmtree
 from pprint import pprint
 import pytest
 
 import finance.load_new_txs as lntx
-from finance.load_new_txs import _prtitle, _db_compare, load_new
+from finance.load_new_txs import _prtitle, _db_compare, load_new_test
 
 from finance.init_scripts import (initialise_project, populate_test_project,
                                   xmake_targets, check_seed)
 from finance.update_dbs import new_updater
 
-seed_df_path = '~/programming/python/myfin/testing/data_setup_test/test_csv_generator.csv'
+seed_df_path = '~/shared/projects/myfin/testing/data_setup_test/test_csv_generator.csv'
 
 
 #--------------- FIXTURES AND CONSTANTS ---------------------------------------
@@ -40,7 +42,14 @@ def new_project_fx(scope="module"):
                                                              index_col='date')
     populate_test_project(seed_df, new_proj_path)
 
-    yield new_proj_path
+    targets = xmake_targets(seed_df_path) 
+    print('targets loaded:')
+    for stage in targets:
+        for db in targets[stage]:
+            print('\n--->' + stage + " / " + db)
+            print(targets[stage][db])
+
+    yield new_proj_path, targets
     # return new_proj_path
 
     # teardown
@@ -58,10 +67,29 @@ proj_directory = {'tx_db.csv',
 
 #-------------- MAIN TEST SEQUENCE --------------------------------------------
 
+def _new(new_project_fx):
+    """
+    In progress
+    """
+
+    main_dir = Path(new_project_fx)
+    # load seed df
+    seed_df = pd.read_csv(seed_df_path, parse_dates=['date'], dayfirst=True,
+                                                             index_col='date')
+    seed_df = seed_df.sort_values('date')
+    seed_df['_item'] = seed_df['ITEM'].str.lower().str.strip()
+    print('\n---> seed_df loaded\n', seed_df)
+
+    # pass to load_new()
+    # test results
+    # make changes
+    # test results
 
 def test_main_seq(new_project_fx):
     # create fixture, yielding path to root of project file structure
-    proj_dir = new_project_fx
+    # and the targets (dfs generated for comparison if all works)
+
+    proj_dir, targets = new_project_fx
 
     # note where we start, then move to the test project directory
     init_dir = os.getcwd()
@@ -74,16 +102,9 @@ def test_main_seq(new_project_fx):
     seed_df['_item'] = seed_df['ITEM'].str.lower().str.strip()
     print('\n---> seed_df loaded\n', seed_df)
 
-    # generate targets (what the seed_df should yield)
-    targets = xmake_targets(seed_df_path) 
-    print('targets loaded:')
-    for stage in targets:
-        for db in targets[stage]:
-            print('\n--->' + stage + " / " + db)
-            print(targets[stage][db])
-
     # run function testing load procedure
-    load_new(seed_df, targets)
+    load_new_test(seed_df, targets)
+    check_disk_dbs(Path(proj_dir), targets, 'loaded')
 
     # make some changes to unknowns_db and fuzzy_db, acc to seed_df
     # get tuples to changeo
@@ -91,17 +112,50 @@ def test_main_seq(new_project_fx):
 
     # run function testing update procedure
     run_updater(seed_df, targets)
-
+    # the next check fails - I think because targets wrong
+    # after update
+    check_disk_dbs(Path(proj_dir), targets, 'updated')
+    
     # go back where we started
     os.chdir(init_dir)
 
     print('\nnew test project in main?:', os.path.exists('new_test_project'))
 
-# def test_x():
-    # print('\nnew test project in test_x?:', os.path.exists('new_test_project'))
-    # # print('/ntx_db\n', pd.read_csv('new_test_project/tx_db.csv'))
+
+def check_disk_dbs(main_dir, targets, stage):
+    """
+    tests if saved dbs are correct by comparing with targets
+    """
+    print('do final, path is', main_dir)
+    tx_db = pd.read_csv(main_dir / 'tx_db.csv', parse_dates=['date'],
+                                            dayfirst=True, index_col='date')
+
+    print('target\n', targets[stage]['tx_db'])
+    compare_target(stage, 'tx_db', tx_db, targets)
+
+    fuzzy_db = pd.read_csv('fuzzy_db.csv', index_col='_item')
+    compare_target(stage, 'fuzzy_db', fuzzy_db, targets)
+
+    unknowns_db = pd.read_csv('unknowns_db.csv', index_col='_item')
+    compare_target(stage, 'unknowns_db', unknowns_db, targets)
 
 
+def compare_target(stage, dbname, df, targets):
+    """helper function to put together tests for each db"""
+
+    print('\n' + 'testing', dbname, '- at stage', stage)
+
+    target_df = targets[stage][dbname]
+    target_df = (target_df.sort_values(by=list(target_df
+                                               .columns)).sort_index())
+    test_df = df[target_df.columns].copy()
+    test_df = test_df.sort_values(by=list(test_df.columns)).sort_index()
+
+    print('\ntest df from csv\n', test_df)
+    print('\ntarget df\n', target_df)
+
+    assert target_df.equals(test_df)
+    print(' ..OK******')
 #-------------- sub functions -------------------------------------------------
 
 def make_db_changes(seed_df):
@@ -130,6 +184,7 @@ def make_db_changes(seed_df):
         # change: anything in unknowns with an update action in seed_df
         # - overwrite with corresponding value in seed_df[update_action]
 
+    # todo: add anything
     unknowns_db = (pd.read_csv('unknowns_db.csv', index_col='_item')
                            .reset_index().set_index(['_item', 'accX']))
     print('\nChanging unknowns_db.  Original:\n', unknowns_db)
@@ -192,14 +247,4 @@ def run_updater(seed_df, targets):
     print('\ntarget\n', target)
 
     _db_compare(target, test)
-
-
-
-#---------- helper functions  ------------------------------------------------
-
-# def test_temp(new_project_fx):
-#     print('\nnew test project in test-temp?:', os.path.exists('new_test_project'))
-#     print(os.listdir())
-#     print(pd.read_csv('new_test_project/tx_db.csv'))
-
 
