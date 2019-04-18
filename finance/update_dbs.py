@@ -9,24 +9,54 @@ This may entail implementing and using a 'manual' flag in tx_db['mode']
 """
 
 
-def new_updater(unknowns_db_path='unknowns_db.csv',
-                cat_db_path='cat_db.csv',
-                tx_db_path='tx_db.csv',
-                fuzzy_db_path='fuzzy_db.csv',
-                return_dbs=False,
-                write_out_dbs=True):
+def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
+    """
+    Scan unknowns_db and fuzzy_db for changes.  Amend these and cat_db, tx_db
+    as reqd.
 
+    Functionality as follows:
 
-    tx_db       = pd.read_csv(tx_db_path, index_col='date')
-    unknowns_db = pd.read_csv(unknowns_db_path, index_col='_item')
-    cat_db      = pd.read_csv(cat_db_path, index_col='_item')
-    fuzzy_db    = pd.read_csv(fuzzy_db_path, index_col='_item')
+        unknowns_db:
+          - rows to exit:
+            - any that have an accY assigned (i.e. not 'unknown')
+              - for these rows, also:
+                  - update tx_db with the new accY
+                  - add the row with new accY to cat_db
+          - rows to enter:
+              - rejects from fuzzy_db, with accY = unknown
+          
+        fuzzy_db:
+          - rows to exit:
+            - any with status == 'rejected'
+              - for these rows, also:
+                  - update tx_db with 'unknown' accY
+                  - add to unknowns_db
+            - any with status == 'confirmed'
+              - for these rows, also:
+                  - add the row with new accY to cat_db
+          - rows to enter:
+              - None
+              
+        cat_db:
+          - rows to exit:
+            - None
+          - rows to enter:
+            - confirmed from fuzzy_db
+            - knowns from unknowns_db
+    """
+
+    tx_db       = pd.read_csv(paths_dict['tx_db'], index_col='date')
+    unknowns_db = pd.read_csv(paths_dict['unknowns_db'], index_col='_item')
+    cat_db      = pd.read_csv(paths_dict['cat_db'], index_col='_item')
+    fuzzy_db    = pd.read_csv(paths_dict['fuzzy_db'], index_col='_item')
 
     tx_by_tup = (tx_db.copy().reset_index()
                              .set_index(['_item', 'accX']).sort_index())
     un_by_tup = unknowns_db.copy().reset_index().set_index(['_item', 'accX'])
     fz_by_tup = fuzzy_db.copy().reset_index().set_index(['_item', 'accX'])
     ca_by_tup = cat_db.copy().reset_index().set_index(['_item', 'accX'])
+    
+    SUM_OF_DB_LENS = sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
 
     # unknowns: any accY != unknown:
     # - overwrite tx_db rows
@@ -99,6 +129,9 @@ def new_updater(unknowns_db_path='unknowns_db.csv',
     # delete from fuzzy_db
     fz_by_tup = fz_by_tup.drop(tuples_to_change)
     fuzzy_db = fz_by_tup.reset_index().set_index('_item')
+
+    # assert no change in number of entries
+    assert SUM_OF_DB_LENS == sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
 
     if write_out_dbs:
         tx_db.to_csv(tx_db_path)
