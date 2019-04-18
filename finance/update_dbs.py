@@ -45,20 +45,26 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
             - knowns from unknowns_db
     """
 
+    # load dbs
     tx_db       = pd.read_csv(paths_dict['tx_db'], index_col='date')
     unknowns_db = pd.read_csv(paths_dict['unknowns_db'], index_col='_item')
     cat_db      = pd.read_csv(paths_dict['cat_db'], index_col='_item')
     fuzzy_db    = pd.read_csv(paths_dict['fuzzy_db'], index_col='_item')
 
+    SUM_OF_DB_LENS = sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
+
+    # make versions 'by tuple', to allow indexing required for overwriting etc
     tx_by_tup = (tx_db.copy().reset_index()
                              .set_index(['_item', 'accX']).sort_index())
     un_by_tup = unknowns_db.copy().reset_index().set_index(['_item', 'accX'])
     fz_by_tup = fuzzy_db.copy().reset_index().set_index(['_item', 'accX'])
     ca_by_tup = cat_db.copy().reset_index().set_index(['_item', 'accX'])
     
-    SUM_OF_DB_LENS = sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
 
-    # unknowns: any accY != unknown:
+
+    ########################## UNKNOWNS #########################
+
+    # any accY != unknown:
     # - overwrite tx_db rows
     # - append to cat_db
     # - delete from unknowns
@@ -66,28 +72,35 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
     # overwrite tx_db
     tuples_to_change = un_by_tup.index[un_by_tup['accY'] != 'unknown']
 
-    # get tx_db rows - NB exclude 'mode'='manual'
+    # get tx_db rows to change - NB exclude 'mode'='manual'
     mask = ((tx_by_tup.index.isin(tuples_to_change)) &
             (tx_by_tup['mode'] != 'manual'))
 
     rows_to_change = tx_by_tup.loc[mask]
+
+    # get the new values to write in
     new_vals = (pd.Series(tuple(rows_to_change.index))
                 .apply(lambda x: un_by_tup.loc[x]))
 
+    # write values to the rows
     tx_by_tup.loc[tx_by_tup.index.isin(tuples_to_change),
                   'accY'] = new_vals.values
     tx_db = tx_by_tup.reset_index().set_index('date')
 
-    # append to cat_db
+    # append to cat_db and reset index for writing out
     ca_by_tup = ca_by_tup.append(un_by_tup[un_by_tup['accY'] != 'unknown'])
     cat_db = ca_by_tup.reset_index().set_index('_item')
     cat_db = cat_db.drop_duplicates()
 
-    # delete from unknowns
+    # delete from unknowns and reset index for writing out
     un_by_tup = un_by_tup.drop(tuples_to_change)
     unknowns_db = un_by_tup.reset_index().set_index('_item')
 
-    # fuzzys: status=='rejected':
+
+    ############################ FUZZY ############################
+
+    #-------------------- STATUS == 'REJECTED' -------------------#
+
     # - overwrite tx_db rows with 'unknown'
     # - append to unknowns_db
     # - delete from fuzzy_db
@@ -102,18 +115,20 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
     tx_by_tup.loc[mask, 'accY'] = 'unknown'
     tx_db = tx_by_tup.reset_index().set_index('date')
 
-    # append to unknowns_db
+    # append to unknowns_db and reset index for writing out
     appendee = pd.DataFrame(index=tuples_to_change)
     appendee['accY'] = 'unknown'
     un_by_tup = un_by_tup.append(appendee)
     un_by_tup = un_by_tup.reset_index().drop_duplicates()
     unknowns_db = un_by_tup.set_index('_item')
 
-    # delete from fuzzy_db
+    # delete from fuzzy_db and reset index for writing out
     fz_by_tup = fz_by_tup.drop(tuples_to_change)
     fuzzy_db = fz_by_tup.reset_index().set_index('_item')
 
-    # fuzzys: status=='confirmed':
+
+    #-------------------- STATUS == 'CONFIRMED' -------------------#
+
     # - append to cat_db
     # - delete from fuzzy_db
 
@@ -126,9 +141,12 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
     cat_db = ca_by_tup.reset_index().drop_duplicates()
     cat_db = cat_db.set_index('_item')
 
-    # delete from fuzzy_db
+    # delete from fuzzy_db and reset index for writing out
     fz_by_tup = fz_by_tup.drop(tuples_to_change)
     fuzzy_db = fz_by_tup.reset_index().set_index('_item')
+
+
+    ########################## TIDYING UP ##########################
 
     # assert no change in number of entries
     assert SUM_OF_DB_LENS == sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
