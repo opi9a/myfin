@@ -36,7 +36,10 @@ from csv files:
 
 """
 
-def load_new(main_dir=Path().cwd()):
+def load_new(main_dir=Path().cwd(),
+             return_dbs=False,
+             write_out_dbs=True,
+             write_out_path=None):
     """
     Main sequence for loading new txs.
     I think everything else either testing or obsolete.
@@ -48,8 +51,8 @@ def load_new(main_dir=Path().cwd()):
 
     main_dir = Path(main_dir).absolute()
 
-    # load the dbs
-    unknowns_db, tx_db, fuzzy_db, cat_db = get_dbs(main_dir)
+    # load the dbs (a dict of dfs)
+    dbs = get_dbs(main_dir)
 
     for acc_path in (main_dir / 'tx_accounts').iterdir():
 
@@ -63,64 +66,91 @@ def load_new(main_dir=Path().cwd()):
             # make and process the tx df
             df = pd.concat([pd.read_csv(x) for x in new_txs_files])
             df = apply_parser(df, acc_path)
-            df = trim_df(df, acc_path)
-            df = add_target_acc_col(df, acc_path, unknowns_db, fuzzy_db, cat_db)
+            df = trim_df(df, acc_path, dbs['tx_db'],
+                         write_out_dbs=write_out_dbs,
+                         write_out_path=write_out_path)
+            df = add_target_acc_col(df, acc_path, dbs)
 
             # check for discontinuity and duplication
-            df_check = check_df(df, acc_path)
+            # df_check = check_df(df, acc_path)
 
+            # return dbs # I AM DEBUGGING !
             # update the dbs
-            fuzzy_db    = update_fuzzies(df, fuzzy_db)
-            unknowns_db = update_unknowns(df, unknowns_db)
-            tx_db       = update_tx_db(df, tx_db)
+            dbs['fuzzy_db']    = update_fuzzy_db(df, dbs['fuzzy_db'])
+            dbs['unknowns_db'] = update_unknowns_db(df, dbs['unknowns_db'])
+            dbs['tx_db']       = update_tx_db(df, dbs['tx_db'])
 
     # save dbs to disc
-    tx_db.to_csv('tx_db.csv') # need dateformat?
-    fuzzy_db.to_csv('fuzzy_db.csv')
-    unknowns_db.to_csv('unknowns_db.csv')
+    if write_out_dbs:
+        if write_out_path is None:
+            out_dir = main_dir
+        else:
+            out_dir = Path(write_out_path)
 
-    return df
+        for db in dbs:
+            dbs[db].to_csv(out_dir / db + '_db.csv')
+
+    if return_dbs:
+        return(dbs)
 
 
-def trim_df(df, acc_path):
 
-    # load previous txs for this account
-    prev_txs_df = pd.read_csv(acc_path / 'prev_txs.csv',
-                              parse_dates=['date'],
-                              dayfirst=True, index_col='date')
+def trim_df(df, acc_path, tx_db,
+            write_out_dbs=True, write_out_path=None):
+    """
+    For an input df, drop any transactions that have previously been loaded
+    for this account.
+    """
 
-    if len(prev_txs_df) == 0:
-        return df.copy()
+    prev_txs = tx_db.loc[tx_db['accX'] == acc_path.name].reset_index()
+
+    if len(prev_txs) == 0:
+        return prev_txs.copy()
 
     df = df.reset_index()
-    print('in trim, df\n', prev_txs_df.reset_index())
-    last_tx_of_prev = tuple(prev_txs_df.reset_index().iloc[-1])
+
+    # make sure only comparing the same columns
+    common_cols = list(set(prev_txs.columns)
+                       .intersection(df.columns))
+    prev_txs = prev_txs[common_cols]
+    df = df[common_cols]
+
+    last_tx_of_prev = tuple(prev_txs.iloc[-1].copy())
+
+    # work out if there is an overlap, and trim if so
     match_index = -1
     df_tuples = [tuple(y) for y in df.values]
     for i, x in enumerate(df_tuples):
         if x == last_tx_of_prev:
             match_index = i
     if match_index != -1:
-        trimmed_df = new_txs_df.iloc[(match_index + 1):].copy()
+        trimmed_df = df.iloc[(match_index + 1):].copy()
     else:
-        trimmed_df = new_txs_df.copy()
+        trimmed_df = df.copy()
 
-    parser = pd.read_pickle(acc_path / 'parser.pkl')
+    if write_out_dbs:
 
-    trimmed_df.to_csv('prev_txs.csv', mode='a', header=False,
-                                date_format=parser['date_format'])
+        if write_out_path is None:
+            out_dir = acc_path
+        else:
+            out_dir = write_out_path / acc_path
+
+        out_path = out_dir / 'prev_txs.csv'
+        parser = pd.read_pickle(acc_path / 'parser.pkl')
+        trimmed_df.to_csv(out_path, mode='a', header=False,
+                                    date_format=parser['date_format'])
     return trimmed_df
 
 
 
-def add_target_acc_col(df, acc_path, unknowns_db, fuzzy_db, cat_db):
+def add_target_acc_col(df, acc_path, dbs):
     """
     Get target account assignments (categories)
     """
     accYs = assign_targets(df._item, acc_path.name,
-                                unknowns_db=unknowns_db,
-                                fuzzy_db=fuzzy_db,
-                                cat_db=cat_db,
+                                unknowns_db=dbs['unknowns_db'],
+                                fuzzy_db=dbs['fuzzy_db'],
+                                cat_db=dbs['cat_db'],
                                )
 
     # make a df with accY, accY and mode columns
@@ -131,10 +161,11 @@ def add_target_acc_col(df, acc_path, unknowns_db, fuzzy_db, cat_db):
     return df
 
 
-def update_fuzzies(df, fuzzy_db):
+def update_fuzzy_db(df, fuzzy_db):
     """
-    Get any fuzzy matches and update the fuzzy_db
+    Get any fuzzy matches and append to fuzzy_db
     """
+
     new_fuzzies = (df.loc[df['mode'] == 'new fuzzy']
                      .set_index('_item', drop=True))
     new_fuzzies['status'] = 'unconfirmed'
@@ -143,9 +174,9 @@ def update_fuzzies(df, fuzzy_db):
     return tidy(fuzzy_db.append(new_fuzzies))
 
 
-def update_unknowns(df, unknowns_db):
+def update_unknowns_db(df, unknowns_db):
     """
-    Get any new unknowns and update the unknowns_db
+    Get any new unknowns and append to unknowns_db
     """
     new_unknowns = (df.loc[df['mode'] == 'new unknown']
                      .set_index('_item', drop=True))
@@ -156,7 +187,7 @@ def update_unknowns(df, unknowns_db):
 
 def update_tx_db(df, tx_db):
     """
-    Get any new unknowns and update the unknowns_db
+    Assign ids to the new txs and append to tx_db
     """
     max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
 
@@ -167,6 +198,9 @@ def update_tx_db(df, tx_db):
 
 
 def check_df(df, acc_path):
+    """
+    Need to work out how to handle balances.  May be optional anyway.
+    """
 
     if balance_continuum(df).sum():
         print('WARNING:', acc_path.name, 'has a balance discontinuity')
@@ -189,17 +223,28 @@ def apply_parser(df, acc_path):
     df = format_new_txs(df, account_name=acc_path.name, parser=parser)
     return df.sort_values('date')
 
+
 def get_dbs(dir_path=None):
 
     if dir_path is None:
         dir_path = Path('.')
+    else:
+        dir_path = Path(dir_path)
 
-    unknowns_db = pd.read_csv(dir_path / 'unknowns_db.csv', index_col='_item')
-    tx_db       = pd.read_csv(dir_path / 'tx_db.csv', index_col='date')
-    fuzzy_db    = pd.read_csv(dir_path / 'fuzzy_db.csv', index_col='_item')
-    cat_db      = pd.read_csv(dir_path / 'cat_db.csv', index_col='_item')
+    dbs = {}
 
-    return unknowns_db, tx_db, fuzzy_db, cat_db
+    dbs['unknowns_db'] = pd.read_csv(dir_path
+                                     / 'unknowns_db.csv', index_col='_item')
+    dbs['tx_db']       = pd.read_csv(dir_path
+                                     / 'tx_db.csv', index_col='date')
+    dbs['fuzzy_db']    = pd.read_csv(dir_path
+                                     / 'fuzzy_db.csv', index_col='_item')
+    dbs['cat_db']      = pd.read_csv(dir_path
+                                     / 'cat_db.csv', index_col='_item')
+
+    dbs['tx_db'].index = pd.to_datetime(dbs['tx_db'].index)
+
+    return dbs
 
 
 def execute_prep_script(dir_path):
@@ -337,7 +382,7 @@ def load_new_test(seed_df=None, targets=None, main_dir=None):
             print('\n---> non-prevs from seed (which should be the same)\n',
                       seed_df_new)
             print('\n' + test_tag + 'overlap removal from df..', end='')
-            _db_compare(df, seed_df_new)
+            db_compare(df, seed_df_new)
             assert df.equals(seed_df_new)
             print(' ..OK')
 
@@ -832,17 +877,35 @@ def _prtitle(titlestring, acc=None, width=90):
     for l in lines:
         print(l)
 
-def _db_compare(target, test):
-    pad = 20
-    print('\nTesting columns:')
-    for col in target.columns:
-        print(str(' - ' + str(col)).ljust(pad), end='')
-        assert test[col].equals(target[col])
-        print(' ..OK')
+def db_compare(target, test, assertion=False):
+    """
+    Compares two dataframes.
+    First naively applies target.equals(test)
 
-    # assert test.equals(target)
-    print('\nTesting rows:')
-    for row in target.index:
-        print(str(' - ' + str(row)[:10]).ljust(pad), end='')
-        assert test.loc[row].equals(target.loc[row])
-        print(' ..OK')
+    If fails then moves on to trying by cell.
+    """
+
+    if not assertion:
+        return target.eq(test)
+
+    if target.equals(test):
+        assert True
+        print('equality by pd.equals()')
+        return
+
+    for col in target.columns:
+        for row in target.index:
+
+            x = test.loc[row, col]
+            y = target.loc[row, col]
+
+            # weird case of Nans
+            if str(x) == 'nan' and str(y) == 'nan':
+                assert True
+
+            else:
+                assert test.loc[row, col] == target.loc[row, col]
+
+    # if got this far, then assertions passed
+    print('equality by cell comparison')
+
