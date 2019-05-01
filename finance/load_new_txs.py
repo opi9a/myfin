@@ -2,43 +2,19 @@ import pandas as pd
 import numpy as np
 import os
 from os import chdir
+from shutil import move
 from pathlib import Path
 from pprint import pprint
 from fuzzywuzzy import fuzz, process
 
 test_tag = '***TEST: '
 
-"""Library of functions and a main function for loading transactions
-from csv files:
+from finance.init_scripts import get_dirs
 
-    0. Look for new tx files in relevant folder - exit if not TODO
-    1. If there is a prep.py, execute it TODO
-    2. Load csvs and concat, using pd functions (keep in RAM) TODO
-    3. Format and structure the csv, using a parser dict, to give a df with standard
-       columns with <format_new_txs()>
-
-    4. Check balance continuum
-    5. Append to prev_txs.csv, net of any overlap
-    6. Get target accounts for the new txs (after netting)
-       with <assign_targets()>:
-        - checks against dbs if already:
-            - known, in <cat_db>
-            - unknown, in <unknowns_db>
-            - fuzzy matched, in <fuzzy_db>
-        - otherwise looks for a new fuzzy match
-        - otherwise assigns as a new unknown
-        - (function also returns the 'mode', a description of how 
-           assignment was made)
-
-    7. append any new fuzzy matches or unknowns to the corresponding db
-
-    8. append new txs to tx_db
-
-"""
-
-def load_new(main_dir=Path().cwd(),
+def load_new(main_dir=Path('.'),
              return_dbs=False,
              write_out_dbs=True,
+             move_new_txs=True,
              write_out_path=None):
     """
     Main sequence for loading new txs.
@@ -55,30 +31,42 @@ def load_new(main_dir=Path().cwd(),
     dbs = get_dbs(main_dir)
 
     for acc_path in (main_dir / 'tx_accounts').iterdir():
+        print('entering', acc_path.name)
 
-        new_txs_files = list((acc_path / 'new_txs').iterdir())
+        prepare_new_csv_files(acc_path.absolute())
 
-        if new_txs_files:
+        dirs = get_dirs(acc_path)
 
-            # prep the files
-            execute_prep_script(acc_path.absolute())
+        for dir in dirs:
+            print(("- " + dir).ljust(20), str(len(dirs[dir])).rjust(3))
 
-            # make and process the tx df
-            df = pd.concat([pd.read_csv(x) for x in new_txs_files])
-            df = apply_parser(df, acc_path)
+
+        if dirs['new_csvs']:
+
+            df = load_new_csv_files(dirs['new_csvs'], acc_path)
+            print('df len', len(df))
             df = trim_df(df, acc_path, dbs['tx_db'],
                          write_out_dbs=write_out_dbs,
                          write_out_path=write_out_path)
+            print('df len', len(df))
             df = add_target_acc_col(df, acc_path, dbs)
+            print('df len', len(df))
 
-            # check for discontinuity and duplication
+            # check for discontinuity only if account reports balance
             # df_check = check_df(df, acc_path)
 
-            # return dbs # I AM DEBUGGING !
             # update the dbs
             dbs['fuzzy_db']    = update_fuzzy_db(df, dbs['fuzzy_db'])
             dbs['unknowns_db'] = update_unknowns_db(df, dbs['unknowns_db'])
             dbs['tx_db']       = update_tx_db(df, dbs['tx_db'])
+
+            # move the processed tx files to another folder
+            # only if write_out_dbs I guess
+            if move_new_txs:
+                for f in dirs['new_csvs']:
+                    move(f, acc_path / 'processed_csvs' / f.name)
+        else:
+            print('did not find dirs["new_csvs"]')
 
     # save dbs to disc
     if write_out_dbs:
@@ -94,6 +82,12 @@ def load_new(main_dir=Path().cwd(),
         return(dbs)
 
 
+def load_new_csv_files(new_txs_files, acc_path):
+    df = pd.concat([pd.read_csv(x) for x in new_txs_files])
+    parser = pd.read_pickle(acc_path / 'parser.pkl')
+    df = format_new_txs(df, account_name=acc_path.name, parser=parser)
+    return df.sort_values('date')
+
 
 def trim_df(df, acc_path, tx_db,
             write_out_dbs=True, write_out_path=None):
@@ -105,7 +99,7 @@ def trim_df(df, acc_path, tx_db,
     prev_txs = tx_db.loc[tx_db['accX'] == acc_path.name].reset_index()
 
     if len(prev_txs) == 0:
-        return prev_txs.copy()
+        return df
 
     df = df.reset_index()
 
@@ -199,7 +193,11 @@ def update_tx_db(df, tx_db):
 
 def check_df(df, acc_path):
     """
-    Need to work out how to handle balances.  May be optional anyway.
+    TODO
+    Check for balance continuity ONLY for accounts with balance.
+    Pass the tx_db and take the last balance for the account.
+    Use this to check for continuity across the gap, and within the
+    new txs.
     """
 
     if balance_continuum(df).sum():
@@ -214,16 +212,6 @@ def check_df(df, acc_path):
     return 0
 
 
-def apply_parser(df, acc_path):
-    """
-    Applies the passed parser to the passed df, to regularise the column names.
-    Returns a df with regular columns.
-    """
-    parser = pd.read_pickle(acc_path / 'parser.pkl')
-    df = format_new_txs(df, account_name=acc_path.name, parser=parser)
-    return df.sort_values('date')
-
-
 def get_dbs(dir_path=None):
 
     if dir_path is None:
@@ -233,30 +221,35 @@ def get_dbs(dir_path=None):
 
     dbs = {}
 
-    dbs['unknowns_db'] = pd.read_csv(dir_path
-                                     / 'unknowns_db.csv', index_col='_item')
-    dbs['tx_db']       = pd.read_csv(dir_path
-                                     / 'tx_db.csv', index_col='date')
-    dbs['fuzzy_db']    = pd.read_csv(dir_path
-                                     / 'fuzzy_db.csv', index_col='_item')
-    dbs['cat_db']      = pd.read_csv(dir_path
-                                     / 'cat_db.csv', index_col='_item')
+    dbs['unknowns_db'] = pd.read_csv(dir_path / 'unknowns_db.csv',
+                                     index_col='_item')
+    dbs['tx_db']       = pd.read_csv(dir_path / 'tx_db.csv',
+                                     index_col='date')
+    dbs['fuzzy_db']    = pd.read_csv(dir_path / 'fuzzy_db.csv',
+                                     index_col='_item')
+    dbs['cat_db']      = pd.read_csv(dir_path / 'cat_db.csv',
+                                     index_col='_item')
 
     dbs['tx_db'].index = pd.to_datetime(dbs['tx_db'].index)
 
     return dbs
 
 
-def execute_prep_script(dir_path):
-    prep_script_path = dir_path / 'prep.py'
-    print('prep_script_path', prep_script_path)
+def prepare_new_csv_files(dir_path):
+    prep_script_path = dir_path.absolute() / 'prep.py'
     if prep_script_path.exists():
         # need to move to directory as can't pass a path to the prep.py script
         pwd = Path.cwd()
+        print('pwd1', Path().cwd())
         chdir(dir_path)
-        # print('contents of prep.py\n', open(prep_script_path).read())
+        print('pwd2', Path().cwd())
+        print('prep_script_path', prep_script_path)
         exec(open(prep_script_path).read())
+
         chdir(pwd)
+        print('pwd3', Path().cwd())
+    else:
+        print('cannot find', prep_script_path)
 
 ##############################################################################
 
@@ -644,6 +637,16 @@ def format_new_txs(new_tx_df, account_name, parser):
 
     """
 
+    # check parser matches input df
+    matches = {col: (col in new_tx_df.columns)
+                   for col in parser['map'].values()}
+    if not all(matches.values()):
+        print('parser map does not match new_tx_df columns')
+        print('parser map values:', list(parser['map'].values()))
+        print('new_tx_df.columns', list(new_tx_df.columns))
+
+        return
+
     # organise columns using parser, and add '_item' column
     df = new_tx_df[list(parser['map'].values())].copy()
     df.columns = parser['map'].keys()
@@ -731,8 +734,6 @@ def assign_targets(_items, account,
         if fuzzymatch and cat_db is not None:
             best_match, score = process.extractOne(_item, cat_db.index.values,
                                                    scorer=fuzz.token_set_ratio)
-            print('in fuzzy match for', _item)
-            print('\nbest match', best_match, 'score', score)
             if score >= fuzzy_threshold:
                 hits = cat_db.loc[[best_match]]
                 results.append((pick_match(best_match, account, hits), 'new fuzzy'))
@@ -794,69 +795,7 @@ def trim_overlap(prev_txs_df, new_txs_df):
 
 
 #------------------------------------------------------------------------------
-#obsolete
-def parse_new_txs(new_tx_paths, account_name, parser):
-
-    """Import raw transactions from csv and return a tx_df in standard format,
-    with date index, and columns: accX(from), accY(to), net_amt
-
-    new_tx_paths : a list of csv files with new transactions
-                    - will also accept a single file path
-
-    account_name : name of the account, for assignation in the 'from' and
-                   'to' columns
-
-    parser       : dict with instructions for processing the raw tx file
-
-                    - 'input_type' : 'credit_debit' or 'net_amt'
-
-                    - 'date_format': eg "%d/%m/%Y"
-
-                    - 'map'        : dict of map for column labels
-                                     (new labels are keys, old are values)
-
-                    - 'debit_sign' : are debits shown as negative
-                                     or positive numbers? (for net_amt inputs)
-                                     - default is 'positive'
-
-                 - mapping must cover following columns (i.e. new labels):
-
-                       - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
-
-                       - credit_debit: 'debit_amt', 'credit_amt' replace 'net_amt'
-
-
-    """
-
-    # 1. aggregate input csvs to a single df
-    if not isinstance(new_tx_paths, list):
-        new_tx_paths = [new_tx_paths]
-
-    date_parser = lambda x: pd.datetime.strptime(x, parser['date_format'])
-
-    new_tx_df = pd.concat([pd.read_csv(f, parse_dates=[parser['map']['date']],
-                                          skipinitialspace=True,
-                                          date_parser=date_parser,
-                                          dayfirst=True)
-                           for f in new_tx_paths])
-
-
-    # 2. organise columns using parser, and add '_item' column
-    
-    new_tx_df = new_tx_df[list(parser['map'].values())]
-    new_tx_df.columns = parser['map'].keys()
-    new_tx_df['_item'] = new_tx_df['ITEM'].str.lower().str.strip() 
-
-    # for credit_debits, make a 'net_amt' column
-    if parser['input_type'] == 'credit_debit':
-        new_tx_df['net_amt'] = (new_tx_df['debit_amt']
-                             .subtract(new_tx_df['credit_amt'], fill_value=0))
-
-    if parser.get('debit_sign', 'positive') == 'positive':
-        new_tx_df['net_amt'] *= -1
-        
-    return new_tx_df[['date', 'ITEM', '_item', 'net_amt']]
-
+# helpers
 
 def tidy(df):
     orig_index = df.index.names
@@ -864,18 +803,6 @@ def tidy(df):
     out = out.sort_values(list(out.columns))
     return out.set_index(orig_index)
 
-
-def _prtitle(titlestring, acc=None, width=90):
-    if acc is None:
-        acc = ""
-    else:
-        acc = "[ " + acc + " ]"
-    lines = []
-    lines.append("-" * width)
-    lines.append(" ".join(["~", acc, titlestring]))
-    lines.append("-" * width)
-    for l in lines:
-        print(l)
 
 def db_compare(target, test, assertion=False):
     """

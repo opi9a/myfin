@@ -5,8 +5,6 @@ from pathlib import Path
 from shutil import copyfile, rmtree
 from datetime import datetime as dt
 
-from finance.load_new_txs import make_parser, tidy
-
 
 def check_seed(seed_df_path):
     print('\nChecking seed.. ', end='')
@@ -226,7 +224,7 @@ def edit_db(db, tuples_to_change, new_vals=None):
 def populate_test_project(seed_df, proj_name=None, return_df=False):
     """Using a seed_df source file with transactions data and other info, 
     create and populate a project, with transaction accounts - including
-    new_txs, dbs etc
+    new_csvs, dbs etc
     """
 
     init_dir = os.getcwd()
@@ -253,17 +251,17 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
     tx_db = pd.read_csv('tx_db.csv')
     max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
 
-    prev_txs = df.loc[df['prev'] == 1].copy()
-    prev_txs['id'] = np.arange(max_current + 1,
-                               max_current + 1 + len(prev_txs)).astype(int)
-    prev_txs['mode'] = 'x'
+    processed_csvs = df.loc[df['prev'] == 1].copy()
+    processed_csvs['id'] = np.arange(max_current + 1,
+                               max_current + 1 + len(processed_csvs)).astype(int)
+    processed_csvs['mode'] = 'x'
 
     # pre_txs becomes the initial tx_db 
     # - will need to overwrite with unknown if db=unknown or None
-    mask = (prev_txs['db']=='unknown') | (prev_txs['db']=='None')
-    prev_txs.loc[mask,'accY'] = 'unknown'
+    mask = (processed_csvs['db']=='unknown') | (processed_csvs['db']=='None')
+    processed_csvs.loc[mask,'accY'] = 'unknown'
 
-    (prev_txs.loc[:,['date', 'accX', 'accY', 'net_amt', 'ITEM',
+    (processed_csvs.loc[:,['date', 'accX', 'accY', 'net_amt', 'ITEM',
                      '_item', 'id', 'mode']]
             .to_csv('tx_db.csv', mode='a', header=False, index=False))
 
@@ -290,13 +288,13 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
         txs = df.loc[df['accX'] == acc].copy()
         txs['balance'] = txs.net_amt.cumsum()
 
-        # write the prev existing txs to prev_txs
+        # write the prev existing txs to processed_csvs
         prev_tx_cols = ['date', 'ITEM', '_item', 'net_amt', 'balance']
         (txs.loc[txs['prev'] == 1, prev_tx_cols]
-            .to_csv('prev_txs.csv', mode='a', header=False, index=False))
+            .to_csv('processed_csvs.csv', mode='a', header=False, index=False))
 
         # return txs
-        # now the new_txs, in accs specified by 'new_file_index'
+        # now the new_csvs, in accs specified by 'new_file_index'
         new = txs.loc[txs['new_file_index'] > 0].copy()
 
         # - also want to transform columns and specify parser to reverse
@@ -314,10 +312,10 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
 
         pd.to_pickle(parser, 'parser.pkl')
 
-        # - now generate the new_txs files (in the new_txs dir)
-        os.chdir('new_txs')
+        # - now generate the new_csvs files (in the new_csvs dir)
+        os.chdir('new_csvs')
         for i in new.t_new_file_index.unique():
-            new_name = 'new_txs' + str(int(i)) + '.csv'
+            new_name = 'new_csvs' + str(int(i)) + '.csv'
             new_df = new.loc[new['t_new_file_index'] == i]
             new_df.to_csv(new_name, index=False)
         os.chdir('..')
@@ -419,53 +417,110 @@ def initialise_project(proj_name, overwrite_existing=False,
     return os.path.abspath(proj_name)
 
 
-def initialise_tx_account(acc_name, has_balance=True):
-    """Starting in an empty tx_accounts dir, 
-    create folder structure for a new tx_account:
-        - proj_path/tx_accounts/acc_name/
-            - new_txs/
-                - <any new files>
-            - prev_txs/
-                - <files after processing>
-            - prev_txs.csv
-            - parser.pkl
-            - prep.py <optional, add later>
+def initialise_tx_account(acc_path):
+    """Create folder structure for a new tx_account in acc_path:
+        - new_pre_csvs/
+            - <any new files requiring processing to make csvs>
+        - processed_pre_csvs/
+            - <pre_csv files after processing>
+        - new_csvs/
+            - <any new files>
+        - processed_csvs/
+            - <files after processing>
+        - parser.pkl
+        - prep.py <optional, add later>
 
     """
-    loglist = []
-    init_dir = os.getcwd()
 
     # check in a tx_accounts dir
-    if os.path.basename(init_dir) != 'tx_accounts':
+    if acc_path.parent.name != 'tx_accounts':
         print('not in a tx_accounts directory, exiting')
+        return
 
-    os.mkdir(acc_name)
-    os.chdir(acc_name)
-    addlog(loglist, 'initialising tx_account: ' + os.getcwd())
+    if acc_path.exists():
+        print(acc_path, 'already exists, exiting')
+        return
+
+    acc_path.mkdir()
 
     # make the empty tx dirs
-    os.mkdir('new_txs')
-    os.mkdir('prev_txs')
-    addlog(loglist, 'made empty new_txs folder in ' + acc_name)
-    addlog(loglist, 'made empty prev_txs folder in ' + acc_name)
+    for d in ['new_pre_csvs', 'processed_pre_csvs',
+              'new_csvs', 'processed_csvs']:
+        (acc_path / d).mkdir()
 
 
-    # make the empty prev_txs.csv
-    cols = ['date', 'ITEM', '_item', 'net_amt'] 
+def get_dirs(path):
+    """
+    Returns a dict whose keys are the directories in path.
+    Values are lists of file paths.
+    """
+    dirs_out = {}
 
-    if has_balance:
-        cols.append('balance')
+    for dir in path.iterdir():
+        if dir.is_dir() and not dir.name.startswith('.'):
+            dirs_out[dir.name] = list(dir.iterdir())
 
-    pd.DataFrame(columns=cols).to_csv('prev_txs.csv', index=False)
+    return dirs_out
 
-    addlog(loglist, 'made empty prev_txs.csv in ' + acc_name)
 
-    os.chdir(init_dir)
+def clean_dir(dir_path, remove_self=False):
+    """
+    Removes all contents of a directory, and optionally the directory itself
+    """
 
-    addlog(loglist, 'returning to init_dir: ' + os.getcwd())
+    print('clean_dir called with dir_path', dir_path)
 
-    # once back in tx_accounts directory, write log out in dir above
-    writelog(loglist, logpath='..')
+    for f in dir_path.iterdir():
+        if f.is_dir():
+            clean_dir(f, remove_self=True)
+        else:
+            f.unlink()
+
+    if remove_self:
+        dir_path.rmdir()
+
+
+def reset_tx_account(tx_account_path=None):
+    """
+    Restore a tx_account to unprocessed state, retaining original input
+    data.
+
+    If there are processed_pre_csvs, move these to new_pre_csvs and
+    delete everything else.
+
+    Otherwise move processed_csvs to new_csvs.
+    """
+
+    if tx_account_path is None:
+        tx_account_path = Path('.')
+
+    print('\nResetting', tx_account_path.absolute().name)
+
+    dirs = get_dirs(tx_account_path)
+
+    print('\nStructure before reset')
+    for dir in dirs:
+        print(("- " + dir).ljust(20), str(len(dirs[dir])).rjust(3))
+
+    if dirs.get('processed_pre_csvs', False):
+        print('\nfound processed_pre_csvs so move to new_pre_csvs '
+              'and delete everything else')
+        for f in dirs['processed_pre_csvs']:
+            f.rename(tx_account_path / 'new_pre_csvs' / f.name)
+        
+        clean_dir(tx_account_path / 'new_csvs', False)
+        clean_dir(tx_account_path / 'processed_csvs', False)
+
+    if dirs.get('processed_csvs', False):
+        print('\nfound processed_csvs so move to new_csvs')
+        for f in dirs['processed_csvs']:
+            f.rename(tx_account_path / 'new_csvs' / f.name)
+        
+    print('\nStructure after reset')
+    dirs = get_dirs(tx_account_path)
+
+    for dir in dirs:
+        print(("- " + dir).ljust(20), str(len(dirs[dir])).rjust(3))
 
 
 def tstamp(width=26):
