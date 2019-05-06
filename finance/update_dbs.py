@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from pathlib import Path    
 
 """Functions for updating databases after manual curation of 
 unknowns.csv and fuzzy.csv
@@ -9,7 +10,7 @@ This may entail implementing and using a 'manual' flag in tx_db['mode']
 """
 
 
-def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
+def update_all_dbs(acc_path=Path(), return_dbs=False, write_out_dbs=True):
     """
     Scan unknowns_db and fuzzy_db for changes.  Amend these and cat_db, tx_db
     as reqd.
@@ -46,10 +47,10 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
     """
 
     # load dbs
-    tx_db       = pd.read_csv(paths_dict['tx_db'], index_col='date')
-    unknowns_db = pd.read_csv(paths_dict['unknowns_db'], index_col='_item')
-    cat_db      = pd.read_csv(paths_dict['cat_db'], index_col='_item')
-    fuzzy_db    = pd.read_csv(paths_dict['fuzzy_db'], index_col='_item')
+    tx_db       = pd.read_csv(acc_path / 'tx_db.csv', index_col='date')
+    unknowns_db = pd.read_csv(acc_path / 'unknowns_db.csv', index_col='_item')
+    cat_db      = pd.read_csv(acc_path / 'cat_db.csv', index_col='_item')
+    fuzzy_db    = pd.read_csv(acc_path / 'fuzzy_db.csv', index_col='_item')
 
     SUM_OF_DB_LENS = sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
 
@@ -152,10 +153,10 @@ def update_all_dbs(paths_dict, return_dbs=False, write_out_dbs=True):
     assert SUM_OF_DB_LENS == sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
 
     if write_out_dbs:
-        tx_db.to_csv(tx_db_path)
-        unknowns_db.to_csv(unknowns_db_path)
-        cat_db.to_csv(cat_db_path)
-        fuzzy_db.to_csv(fuzzy_db_path)
+        tx_db.to_csv(acc_path / 'tx_db.csv')
+        unknowns_db.to_csv(acc_path / 'unknowns_db.csv')
+        cat_db.to_csv(acc_path / 'cat_db.csv')
+        fuzzy_db.to_csv(acc_path / 'fuzzy_db.csv')
 
     if return_dbs:
         return dict(tx_db=tx_db, cat_db=cat_db,

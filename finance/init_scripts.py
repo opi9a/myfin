@@ -3,6 +3,7 @@ import numpy as np
 import os
 from pathlib import Path
 from shutil import copyfile, rmtree
+import json
 from datetime import datetime as dt
 
 
@@ -310,7 +311,8 @@ def populate_test_project(seed_df, proj_name=None, return_df=False):
                   debit_amt = 't_debit_amt',
                   balance = 't_balance')
 
-        pd.to_pickle(parser, 'parser.pkl')
+        with open('parser.json', 'w') as fp:
+            json.dump(parser, fp)
 
         # - now generate the new_csvs files (in the new_csvs dir)
         os.chdir('new_csvs')
@@ -427,7 +429,7 @@ def initialise_tx_account(acc_path):
             - <any new files>
         - processed_csvs/
             - <files after processing>
-        - parser.pkl
+        - parser.json
         - prep.py <optional, add later>
 
     """
@@ -523,6 +525,53 @@ def reset_tx_account(tx_account_path=None):
         print(("- " + dir).ljust(20), str(len(dirs[dir])).rjust(3))
 
 
+def make_parser(input_type = 'credit_debit',
+                  date_format = '%d/%m/%Y',
+                  debit_sign = 'positive',
+                  date = 'date',
+                  ITEM = 'ITEM',
+                  net_amt = 'net_amt',
+                  credit_amt = 'credit_amt',
+                  debit_amt = 'debit_amt',
+                  balance = None,
+               ):
+    """Generate a parser dict for controlling import of new txs from csv.
+
+    input_type      : 'debit_credit' or 'net_amt'
+    date_format     : strftime structure, eg see default
+    debit_sign      : if net_amt, are debits shown as 'positive' or 'negative'
+
+    the rest are column name mappings - that is, the names in the input csv
+    for the columns corresponding to 'date' 'ITEM', 'net_amt' etc
+
+    Will automatically remove mappings that are not reqd, eg will remove 'net_amt'
+    if the input type is 'debit_credit'.
+    """
+
+    parser = dict(input_type = input_type,
+                  date_format = date_format,
+                  debit_sign = debit_sign,
+                  map = dict(date = date,
+                             ITEM = ITEM,
+                             net_amt = net_amt,
+                             credit_amt = credit_amt,
+                             debit_amt = debit_amt,
+                            )
+                 )
+
+    if input_type == 'credit_debit':
+        del parser['map']['net_amt']
+
+    if input_type == 'net_amt':
+        del parser['map']['credit_amt']
+        del parser['map']['debit_amt']
+
+    if balance is not None:
+        parser['map']['balance'] = balance
+
+    return parser
+
+
 def tstamp(width=26):
     return "[ " + str(dt.now()).ljust(width) + " ] "
 
@@ -546,3 +595,44 @@ def print_targets_dict(targets_dict, ind=None):
     
     for s in targets_dict:
         for db in targets_dict[s]: print(f'{s}/{db}')
+
+
+def restore_using_new_csvs(new_csv_path=Path('new_csvs'), file_ext='.pdf',
+                           delete_csvs=False):
+    """
+    Looks in new_csv_path for new csv files, and moves the corresponding 
+    pre_csv file from processed_pre_csvs to new_pre_csvs    
+    """
+
+    print('restoring csvs in', new_csv_path)
+
+    pdf_paths = []
+    for csv in Path('new_csvs').iterdir(): 
+        pdf_name = csv.name.replace('.csv', file_ext) 
+        pdf_paths.append(Path('processed_pre_csvs', pdf_name))
+
+
+    print('\nwill look for these pre_csvs:')
+    print()
+
+    for pdf_path in pdf_paths:
+        print(' -', str(pdf_path).ljust(25), 'Exists:', pdf_path.exists())
+
+    if input('\nrestore these to new_processed_csvs? ').lower() == 'y':
+        print('\nok')
+        for pdf_path in pdf_paths:
+            if not pdf_path.exists():
+                print('cannot find', str(pdf_path), 'to move it')
+                continue
+            new_path = Path('new_pre_csvs', pdf_path.name)
+            print('renaming to', new_path)
+            pdf_path.rename(new_path)
+            print('success', new_path.exists())
+
+
+
+    else:
+        print('\nexiting')
+
+
+
