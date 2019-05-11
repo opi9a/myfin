@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-import os
 from os import chdir
+from os import get_terminal_size
 from shutil import move, copy
 from pathlib import Path
 import json
@@ -11,10 +11,8 @@ from fuzzywuzzy import fuzz, process
 
 from mylogger import get_filelog
 
-from finance.init_scripts import get_dirs
+from finance.init_scripts import get_dirs, DB_NAMES
 
-
-DB_NAMES = ['tx_db', 'cat_db', 'fuzzy_db', 'unknowns_db']
 
 def load_new(main_dir=Path('.'),
              return_dbs=False,
@@ -26,8 +24,6 @@ def load_new(main_dir=Path('.'),
     I think everything else either testing or obsolete.
     Sequence broken into functions, not for reuse but to aid
     structural transparency.
-
-    Returns a df but does all its work on disk anyway.
     """
 
     main_dir = Path(main_dir).absolute()
@@ -38,7 +34,7 @@ def load_new(main_dir=Path('.'),
     for acc_path in (main_dir / 'tx_accounts').iterdir():
         print('entering', acc_path.name)
 
-        # prepare_new_csv_files(acc_path.absolute())
+        prepare_new_csv_files(acc_path.absolute())
 
         tx_dirs = get_dirs(acc_path)
 
@@ -52,7 +48,6 @@ def load_new(main_dir=Path('.'),
                          write_out_dbs=write_out_dbs,
                          write_out_path=write_out_path)
             df = add_target_acc_col(df, acc_path, dbs)
-            print('df len', len(df))
 
             # check for discontinuity only if account reports balance
             # df_check = check_df(df, acc_path)
@@ -79,17 +74,24 @@ def load_new(main_dir=Path('.'),
         for db in dbs:
             dbs[db].to_csv(out_dir / (db + '.csv'))
 
-    print('archiving')
-    archive_dbs(acc_path=main_dir)
+        print('archiving')
+        archive_dbs(acc_path=main_dir)
+
     if return_dbs:
         return(dbs)
 
 
 def load_new_csv_files(new_txs_files, acc_path):
-    df = pd.concat([pd.read_csv(x) for x in new_txs_files])
+    dfs = []
+    for new_txs_file in new_txs_files:
+        new_txs_df = pd.read_csv(new_txs_file)
+        new_txs_df['source'] = new_txs_file.name
+        dfs.append(new_txs_df)
+    df = pd.concat(dfs)
     with open(acc_path / 'parser.json', 'r') as fp:
         parser = json.load(fp)
     df = format_new_txs(df, account_name=acc_path.name, parser=parser)
+    df['ts'] = pd.Timestamp(pd.datetime.now())
     return df.sort_values(['date', 'ITEM'])
 
 
@@ -243,7 +245,10 @@ def prepare_new_csv_files(dir_path):
         print('cannot find', prep_script_path)
 
 
-def archive_dbs(acc_path=None, archive_path=None):
+def archive_dbs(acc_path=None, annotation=None, archive_path=None):
+    """
+    Save a snapshot of the 4 dbs
+    """
 
     print('\nPassed values:')
     print('Archive path', archive_path)
@@ -262,12 +267,18 @@ def archive_dbs(acc_path=None, archive_path=None):
     if not Path(archive_path).exists():
         Path(archive_path).mkdir()
 
-    ts = pd.datetime.now().strftime("%Y%m%d%H%M%S")
+    ts = pd.datetime.now().strftime("%Y%m%d_%H%M")
 
 
     print('\nBefore archiving')
     print('Archive path', archive_path.absolute())
     print('acc_path', acc_path.absolute())
+
+    if annotation is None:
+        annotation = ""
+    else:
+        annotation = "_" + annotation
+
     for db in DB_NAMES:
 
         dir_out = archive_path / db
@@ -276,15 +287,13 @@ def archive_dbs(acc_path=None, archive_path=None):
 
         print('archiving to', dir_out.absolute())
         copy(str(acc_path / (db + '.csv')), 
-             str(dir_out / (ts + '.csv') ))
+             str(dir_out / (ts + annotation + '.csv') ))
 
-
-#------------------------------------------------------------------------------
 
 def format_new_txs(new_tx_df, account_name, parser):
 
     """Return a tx_df in standard format, with date index,
-    and columns: 'date', 'ITEM', '_item', 'net_amt' 
+    and columns: 'date', 'ITEM', '_item', 'net_amt', 'balance', 'source'
 
     new_tx_df    : a df with transactions data
 
@@ -347,6 +356,9 @@ def format_new_txs(new_tx_df, account_name, parser):
 
     if 'balance' in parser['map']:
         cols.append('balance')
+
+    df['source'] = new_tx_df['source'].values
+    cols.append['source']
 
     return df[cols]
 
@@ -459,36 +471,105 @@ def tidy(df):
     return out.set_index(orig_index)
 
 
+def print_title(title_string=""):
+    """
+    Prints a nice title right across the terminal
+    """
+    if title_string:
+        title_string = " " + title_string + " "
+
+    term_cols = get_terminal_size()[0]
+
+    bar1 = int((term_cols - len(title_string)) / 2)
+    bar2 = term_cols - len(title_string) - bar1
+
+    print('\n')
+    print("".join(["*" * bar1, title_string, "*" * bar1]))
+
+
 def db_compare(target, test, assertion=False):
     """
     Compares two dataframes.
-    First naively applies target.equals(test)
+    First naively applies target.equals(test), returns True
+    (and asserts True) if True.
 
-    If fails then moves on to trying by cell.
+    If not, displays differences in rows, and across whole dfs,
+    then returns and asserts False.
     """
 
-    if not assertion:
-        return target.eq(test)
+    # get rid of pesky nans which compare unequal
+    test = test.copy().fillna("BLANK").sort_index()
+    target = target.copy().fillna("BLANK").sort_index()
 
+    print(target.shape, "vs", test.shape, end=": ")
+    # simple equality test
     if target.equals(test):
-        assert True
-        print('equality by pd.equals()')
-        return
+        print('dbs equal by df.equals()')
+        if assertion:
+            assert True
+        return True
+    else:
+        print('NOT EQUAL')
 
-    for col in target.columns:
-        for row in target.index:
+    # if df.equals() fails, compare rows then whole dfs
+    # before asserting and returning False
 
-            x = test.loc[row, col]
-            y = target.loc[row, col]
+    # Compare ROWS, displaying diff if there is one
+    test_rows = set(test.index) 
+    target_rows = set(target.index) 
+    test_cols = set(test.columns) 
+    target_cols = set(target.columns) 
 
-            # weird case of Nans
-            if str(x) == 'nan' and str(y) == 'nan':
-                assert True
-
+    if test_rows != target_rows:
+        print_title('ROW DIFFERENCE')
+        print('\nTest rows:')
+        for row in test_rows:
+            if row in target_rows:
+                print("--", end=" ")
             else:
-                assert test.loc[row, col] == target.loc[row, col]
+                print("**", end=" ")
+            print(row)
+        print('\nTarget rows:')
+        for row in target_rows:
+            if row in test_rows:
+                print("--", end=" ")
+            else:
+                print("++", end=" ")
+            print(row)
 
-    # if got this far, then assertions passed
-    print('equality by cell comparison')
+        if assertion:
+            assert False
 
+
+    # Print df comparisons / differences
+    print_title('DF COMPARISONS')
+
+    # mask - NB a superset / union with all rows and columns
+    mask = test.eq(target)
+
+    # print the result of eq() but using '-' and 'X' markers
+    mask_diff = mask.copy()
+    mask_diff[mask] = '-'
+    mask_diff[~mask] = 'X'
+    print('\nComparison over union')
+    print(mask_diff)
+
+    # print diffs: in x, print '-' where x == y, otherwise print x
+
+    test_diff = test.copy()
+    test_diff[mask] = '-'
+
+    target_diff = target.copy()
+    target_diff[mask] = '-'
+
+    print('\nIn TEST, not in target')
+    print(test_diff)
+
+    print('\nIn TARGET, not in test')
+    print(target_diff)
+
+    if assertion:
+        assert False
+
+    return False
 

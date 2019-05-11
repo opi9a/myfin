@@ -6,6 +6,10 @@ from shutil import copyfile, rmtree
 import json
 from datetime import datetime as dt
 
+DB_NAMES = ['tx_db', 'cat_db', 'fuzzy_db', 'unknowns_db']
+
+TX_DB_COLUMNS = ['accX', 'accY', 'net_amt', 'ITEM', '_item',
+                 'id', 'mode', 'source', 'ts']
 
 def check_seed(seed_df_path):
     print('\nChecking seed.. ', end='')
@@ -382,9 +386,8 @@ def initialise_project(proj_name, overwrite_existing=False,
     db_columns=['_item', 'accX', 'accY']
 
     # tx_db
-    columns=['accX', 'accY', 'net_amt', 'ITEM', '_item', 'id', 'mode']
     ind = pd.DatetimeIndex(start='1/1/1970', periods=0, freq='D', name='date')
-    df = pd.DataFrame(columns=columns, index=ind)
+    df = pd.DataFrame(columns=TX_DB_COLUMNS, index=ind)
     df.to_csv('tx_db.csv', index=True)
     addlog(loglist, 'made empty tx_db.csv')
 
@@ -434,7 +437,7 @@ def initialise_tx_account(acc_path):
 
     """
 
-    # check in a tx_accounts dir
+    # check making it in a tx_accounts dir
     if acc_path.parent.name != 'tx_accounts':
         print('not in a tx_accounts directory, exiting')
         return
@@ -495,6 +498,8 @@ def reset_tx_account(tx_account_path=None):
 
     if tx_account_path is None:
         tx_account_path = Path('.')
+    else:
+        tx_account_path = Path(tx_account_path)
 
     print('\nResetting', tx_account_path.absolute().name)
 
@@ -635,4 +640,22 @@ def restore_using_new_csvs(new_csv_path=Path('new_csvs'), file_ext='.pdf',
         print('\nexiting')
 
 
+def clear_dbs(acc_path=Path()):
+    """
+    Clears dbs except cat_db
+    """
 
+    acc_path = Path(acc_path)
+
+    for db in DB_NAMES:
+        if db != 'cat_db':
+            db_path = acc_path / (db + '.csv')
+            df = pd.read_csv(db_path, index_col=None).iloc[0:0,:]
+            print(db, df)
+            df.to_csv(db_path, index=False)
+
+def tidy(df):
+    orig_index = df.index.names
+    out = df.reset_index().drop_duplicates()
+    out = out.sort_values(list(out.columns))
+    return out.set_index(orig_index)
