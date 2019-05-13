@@ -73,8 +73,6 @@ def update_after_changed_fuzzy(dbs):
       - rows to enter:
           - None
     """
-    # make versions 'by tuple', to allow indexing required for overwriting etc
-    by_tup = {db: get_dbs_by_tuple(dbs[db]) for db in dbs}
 
 
     #-------------------- STATUS == 'REJECTED' -------------------#
@@ -84,26 +82,22 @@ def update_after_changed_fuzzy(dbs):
     # - delete from dbs['fuzzy_db']
 
     # get the tuples to change
-    mask = by_tup['fuzzy_db']['status'] == 'rejected'
-    tuples_to_change = by_tup['fuzzy_db'].index[mask]
+    f = lambda x: x == 'rejected'
+    col = 'status'
+    tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
 
-    # overwrite tx_db rows with 'unknown' - NB exclude 'mode'='manual'
-    mask = ((by_tup['tx_db'].index.isin(tuples_to_change)) &
-            (by_tup['tx_db']['mode'] != 'manual'))
+    # get the new values to write in
+    new_vals = ['unknown'] * len(tuples_to_change)
 
-    by_tup['tx_db'].loc[mask, 'accY'] = 'unknown'
-    dbs['tx_db'] = by_tup['tx_db'].reset_index().set_index('date')
+    # write values to the rows using update_tx_db() accessor
+    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
 
-    # append to dbs['unknowns_db']and reset index for writing out
-    appendee = pd.DataFrame(index=tuples_to_change)
-    appendee['accY'] = 'unknown'
-    by_tup['unknowns_db'] = by_tup['unknowns_db'].append(appendee)
-    by_tup['unknowns_db'] = by_tup['unknowns_db'].reset_index().drop_duplicates()
-    dbs['unknowns_db']= by_tup['unknowns_db'].set_index('_item')
+    # append to unknowns_db and reset index for writing out
+    dbs['unknowns_db']= append_to_db(dbs['unknowns_db'],
+                                         tuples_to_change, new_vals)
 
     # delete from dbs['fuzzy_db'] and reset index for writing out
-    by_tup['fuzzy_db'] = by_tup['fuzzy_db'].drop(tuples_to_change)
-    dbs['fuzzy_db'] = by_tup['fuzzy_db'].reset_index().set_index('_item')
+    dbs['fuzzy_db'] = delete_from_db(dbs['fuzzy_db'], tuples_to_change)
 
 
     #-------------------- STATUS == 'CONFIRMED' -------------------#
@@ -112,20 +106,39 @@ def update_after_changed_fuzzy(dbs):
     # - delete from dbs['fuzzy_db']
 
     # get the tuples to change
-    mask = by_tup['fuzzy_db']['status'] == 'confirmed'
-    tuples_to_change = by_tup['fuzzy_db'].index[mask]
+    f = lambda x: x == 'confirmed'
+    col = 'status'
+    tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
 
     # append to cat_db
-    appendee = pd.DataFrame(by_tup['fuzzy_db'].loc[tuples_to_change, 'accY'])
-
-    print('appendee out\n', appendee)
-    by_tup['cat_db'] = by_tup['cat_db'].append([appendee])
-    dbs['cat_db'] = by_tup['cat_db'].reset_index().drop_duplicates()
-    dbs['cat_db'] = dbs['cat_db'].set_index('_item')
+    new_vals = get_db_by_tuple(dbs['fuzzy_db']).loc[tuples_to_change, 'accY']
+    dbs['cat_db'] = append_to_db(dbs['cat_db'], tuples_to_change, new_vals)
 
     # delete from dbs['fuzzy_db'] and reset index for writing out
-    by_tup['fuzzy_db'] = by_tup['fuzzy_db'].drop(tuples_to_change)
-    dbs['fuzzy_db'] = by_tup['fuzzy_db'].reset_index().set_index('_item')
+    dbs['fuzzy_db'] = delete_from_db(dbs['fuzzy_db'], tuples_to_change)
+
+    #-------------------- STATUS == <OTHER> -------------------#
+    # changed fuzzy assignment.  status is the new accY
+    # overwrite tx_db with the new accY
+    # appendt it to cat_db
+    # delete from fuzzy_db
+    
+    # get the tuples to change
+    f = lambda x: x not in ['rejected', 'confirmed', pd.np.nan]
+    col = 'status'
+    tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
+
+    # get the new values to write in
+    new_vals = get_db_by_tuple(dbs['fuzzy_db']).loc[tuples_to_change, 'status']
+
+    # overwrite tx_db with the new accY
+    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+
+    # append it to cat_db
+    dbs['cat_db'] = append_to_db(dbs['cat_db'], tuples_to_change, new_vals)
+
+    # delete from fuzzy_db
+    dbs['fuzzy_db'] = delete_from_db(dbs['fuzzy_db'], tuples_to_change)
 
     return dbs
 
@@ -145,40 +158,24 @@ def update_after_changed_unknowns(dbs):
           - rejects from fuzzy_db, with accY = unknown
     """
 
-    # make versions 'by tuple', to allow indexing required for overwriting etc
-    by_tup = {db: get_dbs_by_tuple(dbs[db]) for db in dbs}
-
     # overwrite tx_db
-    # - first get the tuples (index) that need to be changed
-    # - that is, unknowns_db rows where accY is NOT unknown
-    mask = by_tup['unknowns_db']['accY'] != 'unknown'
-    tuples_to_change = (by_tup['unknowns_db'].index[mask])
 
-    # now get the corresponding rows from tx_db rows to change
-    # - NB exclude 'mode'='manual'
-    mask = ((by_tup['tx_db'].index.isin(tuples_to_change)) &
-            (by_tup['tx_db']['mode'] != 'manual'))
-
-    rows_to_change = by_tup['tx_db'].loc[mask]
+    # get the tuples to change - unknowns_db rows where accY is NOT unknown
+    f = lambda x: x != 'unknown'
+    col = 'accY'
+    tuples_to_change = get_tuples_to_change(dbs['unknowns_db'], col, f)
 
     # get the new values to write in
-    new_vals = (pd.Series(tuple(rows_to_change.index))
-                .apply(lambda x: by_tup['unknowns_db'].loc[x]))
+    new_vals = get_db_by_tuple(dbs['unknowns_db']).loc[tuples_to_change, 'accY']
 
-    # write values to the rows
-    by_tup['tx_db'].loc[by_tup['tx_db'].index.isin(tuples_to_change),
-                  'accY'] = new_vals.values
-    dbs['tx_db'] = by_tup['tx_db'].reset_index().set_index('date')
+    # write values to the rows using update_tx_db() accessor
+    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
 
     # append to cat_db and reset index for writing out
-    mask = by_tup['unknowns_db']['accY'] != 'unknown'
-    by_tup['cat_db'] = by_tup['cat_db'].append(by_tup['unknowns_db'][mask])
-    dbs['cat_db'] = by_tup['cat_db'].reset_index().set_index('_item')
-    dbs['cat_db'] = dbs['cat_db'].drop_duplicates()
+    dbs['cat_db'] = append_to_db(dbs['cat_db'], tuples_to_change, new_vals)
 
     # delete from unknowns and reset index for writing out
-    by_tup['unknowns_db'] = by_tup['unknowns_db'].drop(tuples_to_change)
-    dbs['unknowns_db'] = by_tup['unknowns_db'].reset_index().set_index('_item')
+    dbs['unknowns_db'] = delete_from_db(dbs['unknowns_db'], tuples_to_change)
 
     return dbs
 
@@ -186,12 +183,76 @@ def update_after_changed_unknowns(dbs):
 
 #-------------------------- HELPERS  -------------------------- 
 
-def get_dbs_by_tuple(df):
+def update_tx_db(tx_db, tuples_to_change, new_vals):
     """
-    Returns a copy of a db with ('_item', 'accX') tuples as index
+    Pass an iterable of '_item', 'accX' tuples_to_change, and an
+    iterable of corresponding new_vals.
+
+    Change the corresponding entries in tx_db
+
+    TODO: exclude 'manual'
     """
 
-    return (df.copy()
+    tx_db_by_tup = get_db_by_tuple(tx_db)
+
+    for tuple, new_val in zip(tuples_to_change, new_vals):
+        tx_db_by_tup.loc[tuple, 'accY'] = new_val
+
+    return tx_db_by_tup.reset_index().set_index('date')
+
+
+def append_to_db(db, tuples_to_append, new_vals, column='accY'):
+    """
+    Makes a df based on the passed tuples_to_append ('_item', 'accX')
+    and new_vals, with name of passed column, and appends to the passed db
+    """
+
+    initial_index = db.index.name
+
+    if isinstance(new_vals, str) and len(tuples_to_append) > 1:
+        print('expanding new_vals')
+        new_vals = [new_vals] * len(tuples_to_append)
+
+    by_tup = get_db_by_tuple(db)
+    appendee = pd.DataFrame({column: new_vals}, index=tuples_to_append)
+    
+    by_tup = by_tup.append([appendee])
+
+    return by_tup.reset_index().set_index(initial_index)
+
+
+def delete_from_db(db, tuples_to_delete):
+    """
+    Deletes specified rows from db, returns db
+    """
+
+    initial_index = db.index.name
+
+    by_tup = get_db_by_tuple(db)
+    by_tup = by_tup.drop(tuples_to_delete)
+
+    return by_tup.reset_index().set_index(initial_index)
+
+
+def get_tuples_to_change(db, col, f):
+    """
+    Return an index of ('_item', 'accX') tuples corresponding to the filter
+    of f applied to column col of input dataframe db.
+
+    Eg passing col = 'accY', f = lambda x: x == 'target' will yield the
+    '_item', 'accX' tuples for txs where accY is 'target'
+    """
+    by_tup = get_db_by_tuple(db)
+    mask = by_tup[col].apply(f)
+    return by_tup.index[mask]
+    
+
+def get_db_by_tuple(db):
+    """
+    Returns a db with ('_item', 'accX') tuples as index
+    """
+
+    return (db#.copy()
               .reset_index()
               .set_index(['_item', 'accX'])
               .sort_index())
@@ -214,186 +275,11 @@ def write_out_dbs(dbs, acc_path, archive=True, annotation=None):
         archive_dbs(acc_path=acc_path, annotation=annotation)
 
 
-
-
-
 #-------------------------- OBSOLETE  -------------------------- 
 
-def update_all_dbs(acc_path=None, dbs=None, return_dbs=False, write_out_dbs=True):
-    """
-    OBSOLETE - replaced with update_dbs, which calls individual functions to
-    make updates based on changes in EITHER fuzzy_db or unknowns_db
-
-    Scan unknowns_db and fuzzy_db for changes.  Amend these and cat_db, tx_db
-    as reqd.
-
-    Functionality as follows:
-
-        unknowns_db:
-          - rows to exit:
-            - any that have an accY assigned (i.e. not 'unknown')
-              - for these rows, also:
-                  - update tx_db with the new accY
-                  - add the row with new accY to cat_db
-          - rows to enter:
-              - rejects from fuzzy_db, with accY = unknown
-          
-        fuzzy_db:
-          - rows to exit:
-            - any with status == 'rejected'
-              - for these rows, also:
-                  - update tx_db with 'unknown' accY
-                  - add to unknowns_db
-            - any with status == 'confirmed'
-              - for these rows, also:
-                  - add the row with new accY to cat_db
-          - rows to enter:
-              - None
-              
-        cat_db:
-          - rows to exit:
-            - None
-          - rows to enter:
-            - confirmed from fuzzy_db
-            - knowns from unknowns_db
-    """
-
-    if acc_path is None and dbs is None:
-        print('need either an acc_path or dict of dbs')
-        return 1
-
-    # load dbs if reqd, assign to variable names
-    if dbs is None:
-        acc_path = Path(acc_path)
-        dbs = load_dbs(acc_path)
-
-    tx_db       = dbs['tx_db']
-    unknowns_db = dbs['unknowns_db']
-    cat_db      = dbs['cat_db']
-    fuzzy_db    = dbs['fuzzy_db']
-
-    SUM_OF_DB_LENS = sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
-
-    # make versions 'by tuple', to allow indexing required for overwriting etc
-    tx_by_tup = (tx_db.copy().reset_index()
-                             .set_index(['_item', 'accX']).sort_index())
-    un_by_tup = unknowns_db.copy().reset_index().set_index(['_item', 'accX'])
-    fz_by_tup = fuzzy_db.copy().reset_index().set_index(['_item', 'accX'])
-    ca_by_tup = cat_db.copy().reset_index().set_index(['_item', 'accX'])
-    
-    dbs_by_tup = {}
-    for db in dbs:
-        dbs_by_tup[db] = (dbs[db].copy()
-                                 .reset_index()
-                                 .set_index(['_item', 'accX'])
-                                 .sort_index())
-
-
-    ########################## UNKNOWNS #########################
-    # any accY != unknown:
-    # - overwrite tx_db rows
-    # - append to cat_db
-    # - delete from unknowns
-
-    # overwrite tx_db
-    tuples_to_change = un_by_tup.index[un_by_tup['accY'] != 'unknown']
-
-    # get tx_db rows to change - NB exclude 'mode'='manual'
-    mask = ((tx_by_tup.index.isin(tuples_to_change)) &
-            (tx_by_tup['mode'] != 'manual'))
-
-    rows_to_change = tx_by_tup.loc[mask]
-
-    # get the new values to write in
-    new_vals = (pd.Series(tuple(rows_to_change.index))
-                .apply(lambda x: un_by_tup.loc[x]))
-
-    # write values to the rows
-    tx_by_tup.loc[tx_by_tup.index.isin(tuples_to_change),
-                  'accY'] = new_vals.values
-    tx_db = tx_by_tup.reset_index().set_index('date')
-
-    # append to cat_db and reset index for writing out
-    ca_by_tup = ca_by_tup.append(un_by_tup[un_by_tup['accY'] != 'unknown'])
-    cat_db = ca_by_tup.reset_index().set_index('_item')
-    cat_db = cat_db.drop_duplicates()
-
-    # delete from unknowns and reset index for writing out
-    un_by_tup = un_by_tup.drop(tuples_to_change)
-    unknowns_db = un_by_tup.reset_index().set_index('_item')
-
-    ############################ FUZZY ############################
-
-    #-------------------- STATUS == 'REJECTED' -------------------#
-
-    # - overwrite tx_db rows with 'unknown'
-    # - append to unknowns_db
-    # - delete from fuzzy_db
-
-    # get the tuples to change
-    tuples_to_change = fz_by_tup.index[fz_by_tup['status'] == 'rejected']
-
-    # overwrite tx_db rows with 'unknown' - NB exclude 'mode'='manual'
-    mask = ((tx_by_tup.index.isin(tuples_to_change)) &
-            (tx_by_tup['mode'] != 'manual'))
-
-    tx_by_tup.loc[mask, 'accY'] = 'unknown'
-    tx_db = tx_by_tup.reset_index().set_index('date')
-
-    # append to unknowns_db and reset index for writing out
-    appendee = pd.DataFrame(index=tuples_to_change)
-    appendee['accY'] = 'unknown'
-    un_by_tup = un_by_tup.append(appendee)
-    un_by_tup = un_by_tup.reset_index().drop_duplicates()
-    unknowns_db = un_by_tup.set_index('_item')
-
-    # delete from fuzzy_db and reset index for writing out
-    fz_by_tup = fz_by_tup.drop(tuples_to_change)
-    fuzzy_db = fz_by_tup.reset_index().set_index('_item')
-
-
-    #-------------------- STATUS == 'CONFIRMED' -------------------#
-
-    # - append to cat_db
-    # - delete from fuzzy_db
-
-    # get the tuples to change
-    tuples_to_change = fz_by_tup.index[fz_by_tup['status'] == 'confirmed']
-
-    # append to cat_db
-    appendee = pd.DataFrame(fz_by_tup.loc[tuples_to_change, 'accY'])
-    print('appendee out (all)\n', appendee)
-    ca_by_tup = ca_by_tup.append([appendee])
-    cat_db = ca_by_tup.reset_index().drop_duplicates()
-    cat_db = cat_db.set_index('_item')
-
-    # delete from fuzzy_db and reset index for writing out
-    fz_by_tup = fz_by_tup.drop(tuples_to_change)
-    fuzzy_db = fz_by_tup.reset_index().set_index('_item')
-
-
-    ########################## TIDYING UP ##########################
-
-    # assert no change in number of entries
-    # assert SUM_OF_DB_LENS == sum([len(x) for x in [unknowns_db, cat_db, fuzzy_db]])
-
-    if write_out_dbs:
-        tx_db.to_csv(acc_path / 'tx_db.csv')
-        unknowns_db.to_csv(acc_path / 'unknowns_db.csv')
-        cat_db.to_csv(acc_path / 'cat_db.csv')
-        fuzzy_db.to_csv(acc_path / 'fuzzy_db.csv')
-
-        archive_dbs(acc_path=acc_path, annotation='update_dbs')
-
-    if return_dbs:
-        return dict(tx_db=tx_db, cat_db=cat_db,
-                    unknowns_db=unknowns_db, fuzzy_db=fuzzy_db)
-
-
-
-
 def edit_tx(df, target_col, new_val, masks, return_txdb=False):
-    """Edits transactions of an input df by selection based on columns
+    """
+    Edits transactions of an input df by selection based on columns
 
     target_col  : the column to be edited
 
