@@ -459,6 +459,8 @@ def get_dirs(path):
     Returns a dict whose keys are the directories in path.
     Values are lists of file paths.
     """
+    path = Path(path)
+
     dirs_out = {}
 
     for dir in path.iterdir():

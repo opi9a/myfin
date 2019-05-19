@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 from pathlib import Path    
+import copy
 
 from finance.load_new_txs import archive_dbs, load_dbs
 
@@ -27,8 +28,10 @@ def update_dbs(changed_db_name, acc_path=None, dbs=None,
     """
     # protection from overwriting disk when testing
     # - pass acc_path when using for real
+    # also make a copy if passing from memory, to avoid overwriting
     if dbs is not None:
         write_out_dbs=False
+        dbs = copy.deepcopy(dbs)
 
     # load dbs from disk, if not passed already
     if dbs is None:
@@ -89,8 +92,10 @@ def update_after_changed_fuzzy(dbs):
     # get the new values to write in
     new_vals = ['unknown'] * len(tuples_to_change)
 
-    # write values to the rows using update_tx_db() accessor
-    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    # write values to the rows using overwrite_tx_db() accessor
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change,
+                                   'rejected fuzzy', col_to_change='mode')
 
     # append to unknowns_db and reset index for writing out
     dbs['unknowns_db']= append_to_db(dbs['unknowns_db'],
@@ -117,6 +122,9 @@ def update_after_changed_fuzzy(dbs):
     # delete from dbs['fuzzy_db'] and reset index for writing out
     dbs['fuzzy_db'] = delete_from_db(dbs['fuzzy_db'], tuples_to_change)
 
+    # overwrite mode in tx_db
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change,
+                                   'confirmed fuzzy', col_to_change='mode')
     #-------------------- STATUS == <OTHER> -------------------#
     # changed fuzzy assignment.  status is the new accY
     # overwrite tx_db with the new accY
@@ -132,7 +140,9 @@ def update_after_changed_fuzzy(dbs):
     new_vals = get_db_by_tuple(dbs['fuzzy_db']).loc[tuples_to_change, 'status']
 
     # overwrite tx_db with the new accY
-    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change,
+                                   'overwritten fuzzy', col_to_change='mode')
 
     # append it to cat_db
     dbs['cat_db'] = append_to_db(dbs['cat_db'], tuples_to_change, new_vals)
@@ -168,8 +178,10 @@ def update_after_changed_unknowns(dbs):
     # get the new values to write in
     new_vals = get_db_by_tuple(dbs['unknowns_db']).loc[tuples_to_change, 'accY']
 
-    # write values to the rows using update_tx_db() accessor
-    dbs['tx_db'] = update_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    # write values to the rows using overwrite_tx_db() accessor
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change, new_vals)
+    dbs['tx_db'] = overwrite_tx_db(dbs['tx_db'], tuples_to_change,
+                                   'overwritten unknown', col_to_change='mode')
 
     # append to cat_db and reset index for writing out
     dbs['cat_db'] = append_to_db(dbs['cat_db'], tuples_to_change, new_vals)
@@ -183,7 +195,11 @@ def update_after_changed_unknowns(dbs):
 
 #-------------------------- HELPERS  -------------------------- 
 
-def update_tx_db(tx_db, tuples_to_change, new_vals):
+#------------------ updator / accessor functions  ------------- 
+# append to / delete from dbs (generic)
+# overwrite tx_db (tx_db only)
+
+def overwrite_tx_db(tx_db, tuples_to_change, new_vals, col_to_change='accY'):
     """
     Pass an iterable of '_item', 'accX' tuples_to_change, and an
     iterable of corresponding new_vals.
@@ -192,11 +208,14 @@ def update_tx_db(tx_db, tuples_to_change, new_vals):
 
     TODO: exclude 'manual'
     """
+    if isinstance(new_vals, str):
+        new_vals = [new_vals] * len(list(tuples_to_change))
+
 
     tx_db_by_tup = get_db_by_tuple(tx_db)
 
     for tuple, new_val in zip(tuples_to_change, new_vals):
-        tx_db_by_tup.loc[tuple, 'accY'] = new_val
+        tx_db_by_tup.loc[tuple, col_to_change] = new_val
 
     return tx_db_by_tup.reset_index().set_index('date')
 

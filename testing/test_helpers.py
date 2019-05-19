@@ -5,23 +5,49 @@ from hashlib import sha1
 
 from termcolor import cprint
 
-def db_compare(target, test, assertion=False):
+from finance.init_scripts import make_parser
+
+
+def db_compare(test, target, db_name=None,
+               ignore_cols= ['id', 'source', 'mode'],
+               assertion=False):
     """
     Compares two dataframes.
+
     First naively applies target.equals(test), returns True
     (and asserts True) if True.
 
     If not, displays differences in rows, and across whole dfs,
     then returns and asserts False.
+
+    ignore_cols affects only equality test - the cols will still be printed
+    and compared if dfs not equal
     """
 
     # get rid of pesky nans which compare unequal
-    test = test.copy().fillna("BLANK").sort_index()
-    target = target.copy().fillna("BLANK").sort_index()
+    test = test.copy().fillna("BLANK")
+    target = target.copy().fillna("BLANK")
+
+    # extend index to include all 'input' cols (i.e. not calculated)
+    # - this is to avoid duplicate index entries which complicate comparisons
+    test = make_extended_index(test)
+    target = make_extended_index(target)
+
+    # make sure columns in same order
+    if set(test.columns) != set(target.columns):
+        print('test and target have different columns')
+        return
+
+    target = target[test.columns]
+
+    if db_name is not None:
+        print_title(db_name.upper())
 
     print(target.shape, "vs", test.shape, end=": ")
+
     # simple equality test
-    if target.equals(test):
+    cols_to_try = test.columns.difference(ignore_cols)
+    if target[cols_to_try].equals(test[cols_to_try]):
         cprint('dbs equal by df.equals()', color='green', attrs=['bold'])
         if assertion:
             assert True
@@ -29,125 +55,316 @@ def db_compare(target, test, assertion=False):
     else:
         cprint('NOT EQUAL', color='red', attrs=['bold'])
 
-    # if df.equals() fails, compare rows then whole dfs
-    # before asserting and returning False
+        print('\ntest df:')
+        print(test)
+        print('\ntarget df:')
+        print(target)
 
-    # Compare ROWS, displaying diff if there is one
-    test_rows = set(test.index) 
-    target_rows = set(target.index) 
-    test_cols = set(test.columns) 
-    target_cols = set(target.columns) 
+    # compare rows
+    if set(test.index) != set(target.index):
+        print_title(db_name + ':  ROW DIFFERENCES')
 
-    if test_rows != target_rows:
-        print_title('ROW DIFFERENCE')
-        print('\nTest rows:')
-        for row in test_rows:
-            if row in target_rows:
-                print("--", end=" ")
-            else:
-                print("**", end=" ")
-            print(row)
-        print('\nTarget rows:')
-        for row in target_rows:
-            if row in test_rows:
-                print("--", end=" ")
-            else:
-                print("++", end=" ")
-            print(row)
+        print('Rows in TEST but not in target')
+        show_row_diffs(test, target)
 
-        assert_False = True
+        print('Rows in TARGET but not in test')
+        show_row_diffs(target, test)
 
     # Print df comparisons / differences
-    print_title('DF COMPARISONS')
+    print_title(db_name + ':  DF COMPARISONS')
 
     # mask - NB a superset / union with all rows and columns
     mask = test.eq(target)
 
     # print the result of eq() but using '-' and 'X' markers
     mask_diff = mask.copy()
-    mask_diff[mask] = '-'
-    mask_diff[~mask] = 'X'
+    mask_diff = mask_diff.where(mask, other='X')
+    mask_diff = mask_diff.where(~mask, other='-')
     print('\nComparison over union')
     print(mask_diff)
 
-    # print diffs: in x, print '-' where x == y, otherwise print x
-
-    test_diff = test.copy()
-    test_diff = test_diff.where(~mask, other='-')
-
-    target_diff = target.copy()
-    target_diff = target_diff.where(~mask, other='-')
-
-    print('\nIn TEST, not in target')
-    print(test_diff)
-
-    print('\nIn TARGET, not in test')
-    print(target_diff)
+    #call diffs func
+    print_title(db_name + ':  TEST')
+    print()
+    show_df_diffs(test, target)
+    print_title(db_name + ':  TARGET')
+    print()
+    show_df_diffs(target, test)
 
     if assertion:
         assert False
 
     return False
 
-def make_test_dbs(master_path):
+
+def make_extended_index(df):
+
+    indexes_to_add = list(df.columns.intersection(['_item', 'accX', 'date']))
+
+    df = df.set_index(indexes_to_add, append=True).sort_index()
+
+    index_list = list(df.index)
+
+    if len(set(index_list)) < len(index_list):
+        print('Duplicate extended index entries')
+
+    return df
+
+
+def show_df_diffs(x, y, verbose=False):
     """
-    From a master xls, make input and targets for all dbs:
-        tx_db, unknowns_db, cat_db, fuzzy_db
+    sort dfs.  For each:
+        get orig index
+        add any from _item, accX, date
+        sort by this index
+        ser original index
 
-    Return a dict of all eight
+    get common set of rows
+    for each unique row in x:
+        see how many rows in y
+        try to match them
     """
 
-    masters = {'input': pd.read_excel(master_path, usecols=range(0,5)),
-               'target': pd.read_excel(master_path, usecols=range(6,11))}
+    pad = 20
+    
+    df_out = x.copy()
 
-    # trim off the 'explanation' section
-    if 'explanation' in masters['input'].index:
-        last_row = masters['input'].index.get_loc('explanation')
-        masters['input'] = masters['input'].iloc[:last_row]
-        masters['target'] = masters['target'].iloc[:last_row]
+    for i, row in enumerate(x.index):
+        if verbose: print_title()
+        if verbose: print(f'\nin row {i}:'.ljust(pad), row)
 
-    new_index = []
-    last = None
+        if not row in y.index:
+            if verbose: print('row not found in y\n')
+            continue
 
-    for i in masters['input'].index:
-        if not pd.isna(i):
-            new_index.append(i)
-            last = i
+        for j, col in enumerate(y.columns):
+            if verbose: print(f' -in col {i}:'.ljust(pad), col)
+
+            if not col in y.columns:
+                if verbose: print('col not found in y\n')
+                continue
+            
+            if verbose: print(' -- x_val:'.ljust(pad), x.loc[row, col])
+            if verbose: print(' -- y_val:'.ljust(pad), y.loc[row, col])
+
+            if y.loc[row, col] == x.loc[row, col]:
+                if verbose: print('ok\n')
+                df_out.loc[row, col] = '-'
+            else:
+                if verbose: print('NOT EQUAL\n')
+
+    print(df_out)
+
+
+def show_row_diffs(x, y):
+
+    cell_max = 12
+
+    x_lines = x.to_string().split('\n')
+
+    print("    " + x_lines[0])
+    print("    " + x_lines[1])
+
+    for i, row in enumerate(x.index):
+        attrs = []
+        if row in y.index:
+            tag = "    "
         else:
-            new_index.append(last)
+            attrs.append('bold')
+            tag = "+++ "
 
-    dbs = {'input': {}, 'target': {}}
-
-    for master in masters:
-        masters[master].index = new_index
-        for db in set(new_index):
-            dbs[master][db] = masters[master].loc[db].reset_index(drop=True)
-            dbs[master][db] = curate_db(dbs[master][db], db)
-
-    return dbs
+        cprint(tag + x_lines[i+2], attrs=attrs)
 
 
-def curate_db(df, db):
 
-    # trim off na rows AT THE END ONLY
-    # if len(df):
-    #     while len(df) and pd.isna(df.iloc[-1]).all():
-    #         df = df[:-1].copy()
 
-    df = df.copy()
-    df.dropna(how='all', inplace=True)
-    if db != 'fuzzy_db':
-        df.drop('status', axis=1, inplace=True)
 
-    if db != 'tx_db':
-        df.set_index('_item', drop=True, inplace=True)
+def make_acc_objects(dfs_dict):
+    """
+    Generate new tx files and parsers from input dict of dfs
 
-    if db == 'tx_db':
-        df.index = pd.date_range(start='1/1/2000', periods=len(df))
-        df.index.name = 'date'
+    Finds accounts by looking for acc* at start of keys.
+    Finds parsers by keys ending *parser.
+    Finds new txs by keys ending *new_txs.
+
+    Returns dict of accounts, each with a parser (if present) and a list of
+    new_txs files.  Eg
+
+    {acc1: 'parser':   <the actual parser dict for acc1>,
+           'new_txs':  [ acc1_new_txs_df1, acc1_new_txs_df2, .. ],
+
+    acc2: 'parser':   <the actual parser dict for acc2>,
+           'new_txs':  [ acc2_new_txs_df1, acc2_new_txs_df2, .. ],
+
+    """
+
+    objects = {key: dfs_dict['input'][key] for key in dfs_dict['input']
+                                         if key.startswith('acc')}
+
+    account_names = set([x.split('_')[0] for x in objects])
+
+    accounts = {}
+
+    for name in account_names:
+        accounts[name] = {'new_txs': {}, 'parser': {}}
+
+        accounts[name]['new_txs'] = {k: objects[k] for k in objects
+                                         if k.startswith(name)
+                                         and k.endswith('new_txs')}
+
+        parsers = [k for k in objects if k.startswith(name)
+                                      and k.endswith('parser')]
+
+        if len(parsers) > 1:
+            print('multiple parsers found for', name, ':')
+            print(parsers)
+            print('using last:', parsers[-1])
+
+        if len(parsers):
+            json_out = {}
+            df = objects[parsers[-1]]
+            for col in df.columns:
+                val = df.loc[1, col]
+                if val != 'None':
+                    json_out[col] = df.loc[1, col]
+
+            accounts[name]['parser'] = make_parser(**json_out)
+
+    return accounts
+
+
+def make_dbs_from_master_dfs(dfs_dict):
+    """
+    Prepares known dbs from passed dict of dfs, 
+    loaded by make_dfs_from_master_xls.
+
+    Other structures are ignored
+    """
+
+    dict_out = {}
+
+    for stage in dfs_dict:
+        dict_out[stage] = {}
+
+        for db in dfs_dict[stage]:
+
+            df = pd.DataFrame(dfs_dict[stage][db])
+
+            if db == 'tx_db':
+                df['net_amt'] = df['net_amt'].astype(float)
+                dict_out[stage][db] = fill_out_test_tx_db(df)
+
+            elif db.endswith('_db'):
+                dict_out[stage][db] = df.set_index('_item')
+
+    return dict_out
+
+
+
+def make_dfs_from_master_xls(master_xls_path):
+    """
+    Parses an xlsx, extracting matrix of dfs defined in row 1 and col 1.
+
+    Returns a dict with first level keys corresponding to row 1 labels,
+    second level keys being col 1 labels
+    """
+
+    raw_df = pd.read_excel(master_xls_path, index_col=0)
+    # return raw_df
+
+    row_plan = make_spans(raw_df.index)
+    col_plan = make_spans(raw_df.columns)
+
+    out = {}
+
+    for col in col_plan:
+        out[col[0]] = {}
+        
+        for row in row_plan:
+
+            if row[0] == 'explanation':
+                continue
+
+            # make a df of the defined area
+            df_area = raw_df.iloc[row[1]:row[2], col[1]:col[2]]
+            
+            # set columns
+            df_area.columns = df_area.iloc[0]
+            df_area = df_area.dropna(how='all', axis=1)
+
+            # stop if completely empty
+            if all(pd.isna(df_area.columns)):
+                continue
+
+            # edge case of empty df (cols, but no rows)
+            if all(pd.isna(df_area.iloc[0])):
+                out[col[0]][row[0]] = pd.DataFrame(columns=df_area.columns)
+                continue
+                   
+            # tidy the rows
+            df_area = df_area.reset_index(drop=True)
+            df_area = df_area.iloc[1:]
+            df_area = df_area.dropna(how='all', axis=0)
+            out[col[0]][row[0]] = df_area
+
+    return out
+
+
+def make_spans(series):
+    """
+    Auxilary function for make_dbs_from_master().
+
+    For an input series with values interspersed by np.nans or 'Unnamed: ' 
+    (i.e. empty cells in loaded xls or csv), return a list of tuples with:
+        (value, start_index, end_index)
+
+    where start_index is the index of value, and end_index is the index
+    of the next value, or the end of the series
+    """
+
+    tags = [(tag, i) for i, tag in enumerate(series)
+                if not (pd.isna(tag) or tag.startswith('Unnamed: '))]
+
+    spans = []
+
+    for i, tag in enumerate(tags):
+        if i == len(tags) - 1:
+            span_end = len(series)
+        else:
+            span_end = tags[i + 1][1] - 1
+
+        spans.append((*tag, span_end))
+
+    return spans
+
+
+def fill_out_test_tx_db(partial_tx_db):
+    """
+    For a partial tx_db with cols ['_item', 'accX', 'accY'],
+    add the rest
+    """
+
+    essential_cols = ['_item', 'accX', 'accY']
+    nonessential_cols = ['net_amt', 'id', 'mode', 'source']
+    df = partial_tx_db
+
+    if not 'date' in df.columns:
+        df['date'] = pd.date_range(start='1/1/2000', periods=len(df))
+
+    df = df.set_index('date', drop=True)
+
+    if not 'net_amt' in df.columns:
         df['net_amt'] = [get_net_amt_hash(x) for x in range(len(df))]
+
+    if not 'id' in df.columns:
         df['id'] = list(range(10, 10 + len(df)))
+
+    df['id'] = df['id'].astype(int)
+
+    if not 'mode' in df.columns:
         df['mode'] = 'not set'
+
+    if not 'source' in df.columns:
         df['source'] = 'make_test_dbs'
 
     return df
@@ -166,24 +383,6 @@ def get_net_amt_hash(index_number):
     str_of_int = str(int.from_bytes(digest, 'big'))
 
     return int(str_of_int[-4:]) / 100
-
-
-def aggregate_dbs(dbs):
-    """
-    Concatenates full set of dbs for pasting / saving to xls for inspection
-    Input a dict of dbs
-    """
-    
-    cols = ['_item', 'accX', 'accY', 'status']
-
-    df_out = pd.DataFrame(columns=cols)
-
-    for db in dbs:
-        df_out.loc[len(df_out)] = [db] + ([""] * (len(df_out.columns) - 1))
-        df_out = df_out.append(dbs[db].reset_index(drop=False),
-                               sort=False, ignore_index=True)
-
-    return df_out[cols]
 
 
 def print_title(title_string=""):
@@ -208,6 +407,18 @@ def print_db_dicts(dbs):
     of a dict of dbs (eg 'input', 'target', 'test')
     """
 
+    # check not a single level
+    try:
+        upper_level_dicts = [isinstance(dbs[x], dict) for x in dbs]
+    except:
+        print('cannot recognise dbs passed')
+        return
+
+    print(upper_level_dicts)
+    if not all(upper_level_dicts):
+        print_db_dfs(dbs)
+        return
+    
     # first get the names of dbs, at the bottom level
     db_names = []
 
@@ -224,7 +435,7 @@ def print_db_dicts(dbs):
             cprint(" - " + stage.upper(), attrs=['bold'])
 
             if db_name == 'tx_db':
-                cols = ['_item', 'accX', 'accY']
+                cols = ['_item', 'accX', 'accY', 'mode']
             else:
                 cols = dbs[stage][db_name].columns
 
@@ -236,35 +447,18 @@ def print_db_dicts(dbs):
                 print('--- empty df ---')
 
 
-
-
-def print_dbs(dbs):
+def print_db_dfs(dbs):
     """
-    Helper which prints all dbs in a dict with 'input' and 'target' sets, 
-    each comprising 'tx_db', 'unknowns_db' etc
+    Prints all dfs in a dict of 'tx_db', 'unknowns_db' etc
     """
-    if not 'input' in dbs.keys():
-        print_xdbs(dbs)
+
+    for db in dbs:
+        print('with db', db, 'type:', type(dbs[db]))
+
+    # for some reason isinstance(df, pd.DataFrame) doesn't work, so hack:
+    if not all(['DataFrame' in str(type(dbs[x])) for x in dbs]):
+        print('need a dict of dfs')
         return
-
-    for db in dbs['input']: 
-        print_title(db)
-        print('\nINPUT') 
-
-        if db == 'tx_db':
-            cols = ['_item', 'accX', 'accY']
-        else:
-            cols = dbs['input'][db].columns
-
-        print(dbs['input'][db][cols].sort_index()) 
-        print('\nTARGET') 
-        print(dbs['target'][db][cols].sort_index())
-
-
-def print_xdbs(dbs):
-    """
-    Prints all dbs in a dict of 'tx_db', 'unknowns_db' etc
-    """
 
     for db in dbs: 
         print_title(db)
@@ -274,4 +468,10 @@ def print_xdbs(dbs):
         else:
             cols = dbs[db].columns
 
-        print(dbs[db][cols].sort_index()) 
+        df = dbs[db][cols].sort_index()
+
+        if len(df):
+            print(df) 
+        else:
+            print('--- empty df ---')
+

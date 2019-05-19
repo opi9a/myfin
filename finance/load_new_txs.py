@@ -32,19 +32,18 @@ def load_new(main_dir=Path('.'),
     dbs = load_dbs(main_dir)
 
     for acc_path in (main_dir / 'tx_accounts').iterdir():
-        print('entering', acc_path.name)
 
         prepare_new_csv_files(acc_path.absolute())
 
         tx_dirs = get_dirs(acc_path)
 
-        for dir in tx_dirs:
-            print(("- " + dir).ljust(20), str(len(tx_dirs[dir])).rjust(3))
+        # for dir in tx_dirs:
+        #     print(("- " + dir).ljust(20), str(len(tx_dirs[dir])).rjust(3))
 
         if tx_dirs['new_csvs']:
 
-            df = load_new_csv_files(tx_dirs['new_csvs'], acc_path)
-            df = trim_df(df, acc_path, dbs['tx_db'],
+            df = load_new_csv_files(acc_path)
+            df = trim_df(df, dbs['tx_db'], acc_path, 
                          write_out_dbs=write_out_dbs,
                          write_out_path=write_out_path)
             df = add_target_acc_col(df, acc_path, dbs)
@@ -81,52 +80,148 @@ def load_new(main_dir=Path('.'),
         return(dbs)
 
 
-def load_new_csv_files(new_txs_files, acc_path):
+def load_new_csv_files(acc_path):
+
+    acc_path = Path(acc_path)
     dfs = []
-    for new_txs_file in new_txs_files:
+
+    for new_txs_file in (acc_path / 'new_csvs').iterdir():
         new_txs_df = pd.read_csv(new_txs_file)
         new_txs_df['source'] = new_txs_file.name
         dfs.append(new_txs_df)
     df = pd.concat(dfs)
     with open(acc_path / 'parser.json', 'r') as fp:
         parser = json.load(fp)
+
     df = format_new_txs(df, account_name=acc_path.name, parser=parser)
     df['ts'] = pd.Timestamp(pd.datetime.now())
     return df.sort_values(['date', 'ITEM'])
 
 
-def trim_df(df, acc_path, tx_db,
+def format_new_txs(new_tx_df, account_name, parser):
+
+    """Return a tx_df in standard format, with date index,
+    and columns: 'date', 'ITEM', '_item', 'net_amt', 'balance', 'source'
+
+    new_tx_df    : a df with transactions data
+
+    account_name : name of the account, for assignation in the 'from' and
+                   'to' columns
+
+    parser       : dict with instructions for processing the raw tx file
+
+                    - 'input_type' : 'credit_debit' or 'net_amt'
+
+                    - 'date_format': eg "%d/%m/%Y"
+
+                    - 'map'        : dict of map for column labels
+                                     (new labels are keys, old are values)
+
+                    - 'debit_sign' : are debits shown as negative
+                                     or positive numbers? (for net_amt inputs)
+                                     - default is 'positive'
+
+                 - mapping must cover following columns (i.e. new labels):
+
+                       - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
+
+                       - credit_debit: 'debit_amt', 'credit_amt'
+                         replace 'net_amt'
+
+                 - may optionally provide a mapping for 'balance'
+
+    """
+
+    # check parser matches input df
+    matches = {col: (col in new_tx_df.columns)
+                   for col in parser['map'].values()}
+    if not all(matches.values()):
+        print('parser map does not match new_tx_df columns, so quitting')
+        print('parser map values:', sorted(list(parser['map'].values())))
+        print('new_tx_df.columns', sorted(list(new_tx_df.columns)))
+
+        return
+
+    # organise columns using parser, and add '_item' column
+    df = new_tx_df[list(parser['map'].values())].copy()
+    df.columns = parser['map'].keys()
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.set_index('date').sort_index()
+    df['_item'] = df['ITEM'].str.lower().str.strip() 
+
+    # for credit_debits, make a 'net_amt' column
+    if parser['input_type'] == 'credit_debit':
+        df['debit_amt'] = pd.to_numeric(df['debit_amt'], errors='coerce')
+        df['credit_amt'] = pd.to_numeric(df['credit_amt'], errors='coerce')
+
+        df['net_amt'] = (df['debit_amt']
+                             .subtract(df['credit_amt'], fill_value=0))
+
+    if parser.get('debit_sign', 'positive') == 'positive':
+        df['net_amt'] *= -1
+        
+    cols = ['ITEM', '_item', 'net_amt']
+
+    if 'balance' in parser['map']:
+        cols.append('balance')
+
+    df['source'] = new_tx_df['source'].values
+    cols.append('source')
+
+    return df[cols]
+
+
+def trim_df(df, tx_db, acc_path=None, 
             write_out_dbs=True, write_out_path=None):
     """
     For an input df, drop any transactions that have previously been loaded
     for this account.
     """
 
+    if write_out_dbs and (acc_path is None):
+        print("trim_df():  need an acc_path if write_out_dbs")
+        return 1
+
+    acc_path = Path(acc_path)
+
     prev_txs = tx_db.loc[tx_db['accX'] == acc_path.name].reset_index()
 
+    # just return if no prev txs
     if len(prev_txs) == 0:
         return df
 
-    df = df.reset_index()
+    # else process the overlap
+    prev_txs = prev_txs.sort_values(['date', '_item'])
+    df = df.reset_index().sort_values(['date', '_item'])
 
     # make sure only comparing the same columns
     common_cols = list(set(prev_txs.columns)
                        .intersection(df.columns))
-    prev_txs = prev_txs[common_cols]
-    df = df[common_cols]
 
-    last_tx_of_prev = tuple(prev_txs.iloc[-1].copy())
+    # drop source - must be different
+    common_cols = [x for x in common_cols if x != 'source']
 
-    # work out if there is an overlap, and trim if so
-    match_index = -1
-    df_tuples = [tuple(y) for y in df.values]
+    # get the last tx of previous as a tuple (of common_cols)
+    last_tx_of_prev = tuple(prev_txs[common_cols].iloc[-1])
+
+    # and the df as tuples (applying common cols)
+    df_tuples = [tuple(y) for y in df[common_cols].values]
+
+    # variable to hold match index (if there is one)
+    match_index = None
+
+    # look for a match index by comparing the last prev with df tuples
     for i, x in enumerate(df_tuples):
         if x == last_tx_of_prev:
             match_index = i
-    if match_index != -1:
+
+    # trim original df if found a match
+    if match_index is not None:
         trimmed_df = df.iloc[(match_index + 1):].copy()
     else:
         trimmed_df = df.copy()
+
+    trimmed_df = trimmed_df.set_index('date')
 
     if write_out_dbs:
 
@@ -152,8 +247,7 @@ def add_target_acc_col(df, acc_path, dbs):
     accYs = assign_targets(df._item, acc_path.name,
                                 unknowns_db=dbs['unknowns_db'],
                                 fuzzy_db=dbs['fuzzy_db'],
-                                cat_db=dbs['cat_db'],
-                               )
+                                cat_db=dbs['cat_db'])
 
     # make a df with accY, accY and mode columns
     df['accX'] = acc_path.name
@@ -191,12 +285,19 @@ def update_tx_db(df, tx_db):
     """
     Assign ids to the new txs and append to tx_db
     """
-    max_current = int(tx_db['id'].max()) if len(tx_db>0) else 100
+    if len(tx_db):
+        max_current = tx_db['id'].max()
+    else:
+        max_current = 100
 
     df['id'] = np.arange(max_current + 1,
                          max_current + 1 + len(df)).astype(int)
 
-    return tx_db.append(df[tx_db.columns])
+    df_out = tx_db.append(df[tx_db.columns])
+    df_out.index.name = 'date'
+
+    return df_out
+
 
 
 def check_df(df, acc_path):
@@ -225,6 +326,8 @@ def load_dbs(dir_path=Path()):
     Loads dbs from disk, returning a dict
     """
 
+    dir_path = Path(dir_path)
+
     dbs = {}
 
     for db in DB_NAMES:
@@ -242,7 +345,7 @@ def prepare_new_csv_files(dir_path):
         subprocess.run(['python', str(prep_script_path.absolute()),
                         str(dir_path)])
     else:
-        print('cannot find', prep_script_path)
+        pass
 
 
 def archive_dbs(acc_path=None, annotation=None, archive_path=None):
@@ -288,79 +391,6 @@ def archive_dbs(acc_path=None, annotation=None, archive_path=None):
         print('archiving to', dir_out.absolute())
         copy(str(acc_path / (db + '.csv')), 
              str(dir_out / (ts + annotation + '.csv') ))
-
-
-def format_new_txs(new_tx_df, account_name, parser):
-
-    """Return a tx_df in standard format, with date index,
-    and columns: 'date', 'ITEM', '_item', 'net_amt', 'balance', 'source'
-
-    new_tx_df    : a df with transactions data
-
-    account_name : name of the account, for assignation in the 'from' and
-                   'to' columns
-
-    parser       : dict with instructions for processing the raw tx file
-
-                    - 'input_type' : 'credit_debit' or 'net_amt'
-
-                    - 'date_format': eg "%d/%m/%Y"
-
-                    - 'map'        : dict of map for column labels
-                                     (new labels are keys, old are values)
-
-                    - 'debit_sign' : are debits shown as negative
-                                     or positive numbers? (for net_amt inputs)
-                                     - default is 'positive'
-
-                 - mapping must cover following columns (i.e. new labels):
-
-                       - net_amt: ['date', 'accX', 'accY', 'net_amt', 'ITEM']
-
-                       - credit_debit: 'debit_amt', 'credit_amt'
-                         replace 'net_amt'
-
-                 - may optionally provide a mapping for 'balance'
-
-    """
-
-    # check parser matches input df
-    matches = {col: (col in new_tx_df.columns)
-                   for col in parser['map'].values()}
-    if not all(matches.values()):
-        print('parser map does not match new_tx_df columns')
-        print('parser map values:', list(parser['map'].values()))
-        print('new_tx_df.columns', list(new_tx_df.columns))
-
-        return
-
-    # organise columns using parser, and add '_item' column
-    df = new_tx_df[list(parser['map'].values())].copy()
-    df.columns = parser['map'].keys()
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.set_index('date').sort_index()
-    df['_item'] = df['ITEM'].str.lower().str.strip() 
-
-    # for credit_debits, make a 'net_amt' column
-    if parser['input_type'] == 'credit_debit':
-        df['debit_amt'] = pd.to_numeric(df['debit_amt'], errors='coerce')
-        df['credit_amt'] = pd.to_numeric(df['credit_amt'], errors='coerce')
-
-        df['net_amt'] = (df['debit_amt']
-                             .subtract(df['credit_amt'], fill_value=0))
-
-    if parser.get('debit_sign', 'positive') == 'positive':
-        df['net_amt'] *= -1
-        
-    cols = ['ITEM', '_item', 'net_amt']
-
-    if 'balance' in parser['map']:
-        cols.append('balance')
-
-    df['source'] = new_tx_df['source'].values
-    cols.append['source']
-
-    return df[cols]
 
 
 #------------------------------------------------------------------------------
@@ -428,16 +458,40 @@ def assign_targets(_items, account,
             continue
 
         if fuzzymatch and cat_db is not None:
-            best_match, score = process.extractOne(_item, cat_db.index.values,
-                                                   scorer=fuzz.token_set_ratio)
-            if score >= fuzzy_threshold:
-                hits = cat_db.loc[[best_match]]
-                results.append((pick_match(best_match, account, hits), 'new fuzzy'))
+            fuzzy_hit = make_fuzzy_match(_item, cat_db.index.values)
+
+            if fuzzy_hit:
+                hits = cat_db.loc[[fuzzy_hit]]
+                results.append((pick_match(fuzzy_hit, account, hits),
+                                'new fuzzy'))
                 continue
 
         results.append(('unknown', 'new unknown'))
 
     return results
+
+
+def make_fuzzy_match(input_string, reference_set, threshold=55):
+
+    matches = {}
+
+    scorers = { 'ratio': fuzz.ratio,
+                # 'partial_ratio': fuzz.partial_ratio,
+                'token_set_ratio': fuzz.token_set_ratio,
+                'token_sort_ratio': fuzz.token_sort_ratio,
+              }
+
+    for scorer in scorers: 
+        matches[scorer] = process.extractOne(input_string, reference_set,
+                                             scorer=scorers[scorer])
+
+    top_hit = max(matches, key=lambda x: matches[x][1])
+
+    if matches[top_hit][1] >= threshold:
+        return matches[top_hit][0]
+
+    else:
+        return False
 
 
 #------------------------------------------------------------------------------
