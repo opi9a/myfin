@@ -9,7 +9,7 @@ from finance.init_scripts import make_parser
 
 
 def db_compare(test, target, db_name=None,
-               ignore_cols= ['id', 'source', 'mode'],
+               ignore_cols=['id', 'source', 'mode'],
                assertion=False):
     """
     Compares two dataframes.
@@ -42,6 +42,11 @@ def db_compare(test, target, db_name=None,
 
     if db_name is not None:
         print_title(db_name.upper())
+
+    if ignore_cols:
+        print('ignoring columns', ignore_cols, end=" ")
+    else:
+        print('ignoring no columns', end=" ")
 
     print(target.shape, "vs", test.shape, end=": ")
 
@@ -251,8 +256,9 @@ def make_dbs_from_master_dfs(dfs_dict):
             df = pd.DataFrame(dfs_dict[stage][db])
 
             if db == 'tx_db':
+                df = fill_out_test_tx_db(df)
                 df['net_amt'] = df['net_amt'].astype(float)
-                dict_out[stage][db] = fill_out_test_tx_db(df)
+                dict_out[stage][db] = df
 
             elif db.endswith('_db'):
                 dict_out[stage][db] = df.set_index('_item')
@@ -401,7 +407,7 @@ def print_title(title_string=""):
     print("".join(["*" * bar1, title_string, "*" * bar1]))
 
 
-def print_db_dicts(dbs):
+def print_db_dicts(dbs, ignore_cols=['source', 'id']):
     """
     Helper which prints dbs ('tx_db', 'fuzzy_db' etc) from all members
     of a dict of dbs (eg 'input', 'target', 'test')
@@ -416,7 +422,7 @@ def print_db_dicts(dbs):
 
     print(upper_level_dicts)
     if not all(upper_level_dicts):
-        print_db_dfs(dbs)
+        print_db_dfs(dbs, ignore_cols)
         return
     
     # first get the names of dbs, at the bottom level
@@ -434,12 +440,9 @@ def print_db_dicts(dbs):
             print()
             cprint(" - " + stage.upper(), attrs=['bold'])
 
-            if db_name == 'tx_db':
-                cols = ['_item', 'accX', 'accY', 'mode']
-            else:
-                cols = dbs[stage][db_name].columns
-
-            df = dbs[stage][db_name][cols].sort_index()
+            df = dbs[stage][db_name]
+            cols = df.columns.difference(ignore_cols)
+            df = df[cols].sort_index()
 
             if len(df):
                 print(df) 
@@ -447,10 +450,13 @@ def print_db_dicts(dbs):
                 print('--- empty df ---')
 
 
-def print_db_dfs(dbs):
+def print_db_dfs(dbs, ignore_cols=None):
     """
     Prints all dfs in a dict of 'tx_db', 'unknowns_db' etc
     """
+
+    if ignore_cols is None:
+        ignore_cols = ['source', 'id']
 
     for db in dbs:
         print('with db', db, 'type:', type(dbs[db]))

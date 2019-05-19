@@ -21,9 +21,6 @@ def load_new(main_dir=Path('.'),
              write_out_path=None):
     """
     Main sequence for loading new txs.
-    I think everything else either testing or obsolete.
-    Sequence broken into functions, not for reuse but to aid
-    structural transparency.
     """
 
     main_dir = Path(main_dir).absolute()
@@ -36,9 +33,6 @@ def load_new(main_dir=Path('.'),
         prepare_new_csv_files(acc_path.absolute())
 
         tx_dirs = get_dirs(acc_path)
-
-        # for dir in tx_dirs:
-        #     print(("- " + dir).ljust(20), str(len(tx_dirs[dir])).rjust(3))
 
         if tx_dirs['new_csvs']:
 
@@ -239,7 +233,6 @@ def trim_df(df, tx_db, acc_path=None,
     return trimmed_df
 
 
-
 def add_target_acc_col(df, acc_path, dbs):
     """
     Get target account assignments (categories)
@@ -262,7 +255,7 @@ def update_fuzzy_db(df, fuzzy_db):
     Get any fuzzy matches and append to fuzzy_db
     """
 
-    new_fuzzies = (df.loc[df['mode'] == 'new fuzzy']
+    new_fuzzies = (df.loc[df['mode'] == 'fuzzy match']
                      .set_index('_item', drop=True))
     new_fuzzies['status'] = 'unconfirmed'
     new_fuzzies = new_fuzzies[fuzzy_db.columns]
@@ -297,7 +290,6 @@ def update_tx_db(df, tx_db):
     df_out.index.name = 'date'
 
     return df_out
-
 
 
 def check_df(df, acc_path):
@@ -340,6 +332,9 @@ def load_dbs(dir_path=Path()):
 
 
 def prepare_new_csv_files(dir_path):
+    """
+    Execute script to generate prepared csvs
+    """
     prep_script_path = dir_path.absolute() / 'prep.py'
     if prep_script_path.exists():
         subprocess.run(['python', str(prep_script_path.absolute()),
@@ -444,17 +439,17 @@ def assign_targets(_items, account,
               and len(unknowns_db) > 0
               and unknowns_db.index.contains(_item)):
 
-            results.append(('unknown', 'old unknown'))
+            results.append(('unknown', 'looked up unknown'))
             continue
 
         if cat_db is not None and cat_db.index.contains(_item):
             hits = cat_db.loc[[_item]]
-            results.append((pick_match(_item, account, hits), 'known'))
+            results.append((pick_match(_item, account, hits), 'looked up known'))
             continue
 
         if fuzzy_db is not None and fuzzy_db.index.contains(_item):
             hits = fuzzy_db.loc[[_item]]
-            results.append((pick_match(_item, account, hits), 'old fuzzy'))
+            results.append((pick_match(_item, account, hits), 'looked up fuzzy'))
             continue
 
         if fuzzymatch and cat_db is not None:
@@ -463,7 +458,7 @@ def assign_targets(_items, account,
             if fuzzy_hit:
                 hits = cat_db.loc[[fuzzy_hit]]
                 results.append((pick_match(fuzzy_hit, account, hits),
-                                'new fuzzy'))
+                                'fuzzy match'))
                 continue
 
         results.append(('unknown', 'new unknown'))
