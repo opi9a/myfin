@@ -8,5 +8,5 @@ def test_all():
     Just a script that calls all known tests
     """
 
-    test_all_update()
     test_load_new_txs()
+    test_all_update()

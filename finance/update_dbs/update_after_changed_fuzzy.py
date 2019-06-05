@@ -35,8 +35,7 @@ def update_after_changed_fuzzy(dbs):
     # - delete from dbs['fuzzy_db']
 
     # get the tuples to change
-    def f(x):
-        return x == 'rejected'
+    def f(x): return x == 'rejected'
     col = 'status'
     tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
 
@@ -62,7 +61,7 @@ def update_after_changed_fuzzy(dbs):
     # - delete from dbs['fuzzy_db']
 
     # get the tuples to change
-    f = lambda x: x == 'confirmed'
+    def f(x): return x == 'confirmed'
     col = 'status'
     tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
 
@@ -79,11 +78,11 @@ def update_after_changed_fuzzy(dbs):
     #-------------------- STATUS == <OTHER> -------------------#
     # changed fuzzy assignment.  status is the new accY
     # overwrite tx_db with the new accY
-    # appendt it to cat_db
+    # append it to cat_db
     # delete from fuzzy_db
     
     # get the tuples to change
-    f = lambda x: x not in ['rejected', 'confirmed', pd.np.nan]
+    def f(x): return x not in ['rejected', 'confirmed', pd.np.nan]
     col = 'status'
     tuples_to_change = get_tuples_to_change(dbs['fuzzy_db'], col, f)
 

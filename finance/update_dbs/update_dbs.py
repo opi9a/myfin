@@ -3,7 +3,10 @@ import os
 from pathlib import Path    
 import copy
 
-from finance.load_new_txs import archive_dbs, load_dbs_from_disk
+from mylogger import get_filelog
+
+from finance.load_new_txs.archive_dbs import archive_dbs
+from finance.helpers.load_dbs_from_disk import load_dbs_from_disk
 
 from .update_after_changed_unknowns import update_after_changed_unknowns
 from .update_after_changed_fuzzy import update_after_changed_fuzzy
@@ -29,6 +32,10 @@ def update_dbs_after_changes(changed_db_name, acc_path=None, dbs=None,
     unknowns_db changes on dbs in memory).
 
     """
+    if acc_path is not None:
+        logger = get_filelog(acc_path.parents[1] / 'log.txt')
+        logger.info('calling update_dbs_after_changes() for ' + acc_path.name)
+
     # protection from overwriting disk when testing
     # - pass acc_path when using for real
     # also make a copy if passing from memory, to avoid overwriting
@@ -56,7 +63,7 @@ def update_dbs_after_changes(changed_db_name, acc_path=None, dbs=None,
     assert SUM_OF_DB_LENS == sum([len(dbs[x]) for x in dbs])
 
     if write_out_dbs:
-        write_out_dbs(dbs, acc_path, annotation='updated_unknowns_db')
+        write_out_dbs(dbs, acc_path, annotation='updated_' + changed_db_name)
 
     if return_dbs:
         return dbs

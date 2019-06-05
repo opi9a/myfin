@@ -10,6 +10,7 @@ def append_to_all_dbs(df, dbs):
 
     return dbs
 
+
 def append_to_fuzzy_db(df, fuzzy_db):
     """
     Get any fuzzy matches and append to fuzzy_db
@@ -46,7 +47,10 @@ def append_to_tx_db(df, tx_db):
     df['id'] = pd.np.arange(max_current + 1,
                          max_current + 1 + len(df)).astype(int)
 
-    df_out = tx_db.append(df[tx_db.columns])
+    missing_cols = tx_db.columns.difference(df.columns)
+    cols_to_append = df.columns.intersection(tx_db.columns)
+
+    df_out = tx_db.append(df[cols_to_append], sort=False)
     df_out.index.name = 'date'
 
     return df_out

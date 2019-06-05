@@ -1,5 +1,12 @@
 # myfin/finance/debug_scripts/initialise_project.py
 
+import pandas as pd
+
+from pathlib import Path
+from shutil import rmtree, copy
+
+from finance.helpers.constants import TX_DB_COLUMNS
+
 """
 Perhaps obsolete but should still work and may still be useful.
 
@@ -8,7 +15,8 @@ Will need to sort imports
 
 def initialise_project(proj_name, overwrite_existing=False,
                        parent_dir=None,
-                       cat_db_to_import=None):
+                       dbs_to_import=None,
+                      ):
 
     """Required structure:
 
@@ -24,67 +32,61 @@ def initialise_project(proj_name, overwrite_existing=False,
         but no rows.
     """
 
-    # open a log list
-    loglist = []
 
     # start from wherever called and make a directory with proj_name
     if parent_dir is None:
-        parent_dir = os.getcwd()
-    print('\ninitialising project in dir:', parent_dir)
-    if not os.path.exists(proj_name):
-        print('trying to create', proj_name)
-        os.mkdir(proj_name)
+        parent_dir = Path().expanduser()
+
+    proj_path = Path(parent_dir) / proj_name
+
+    print('\ninitialising project at:', proj_path)
+
+    if not proj_path.exists():
+        print('trying to create', proj_path)
+        proj_path.mkdir()
+
     elif overwrite_existing:
         print(proj_name, 'exists already, overwriting it')
-        rmtree(proj_name)
-        os.mkdir(proj_name)
+        rmtree(proj_path)
+        proj_path.mkdir()
+
     else:
         print("A project with that name already exists in this directory.\
               pass 'overwrite_existing=True' to overwrite it")
         return 1
 
-    os.chdir(proj_name)
-
-    # make log first
-    with open('log.txt', 'w') as f:
-        f.write(tstamp() + 'initialising new project ' + proj_name + '\n')
-
     # handy set of columns 
-    db_columns=['_item', 'accX', 'accY']
 
     # tx_db
     ind = pd.DatetimeIndex(start='1/1/1970', periods=0, freq='D', name='date')
     df = pd.DataFrame(columns=TX_DB_COLUMNS, index=ind)
-    df.to_csv('tx_db.csv', index=True)
-    addlog(loglist, 'made empty tx_db.csv')
+    df.to_csv((proj_path / 'tx_db.csv'), index=True)
 
-    # cat_db
-    if cat_db_to_import is not None:
-        cat_db_to_import = os.path.join('..', cat_db_to_import)
-        copyfile(cat_db_to_import, 'cat_db.csv')
-        addlog(loglist, 'imported cat_db from' + cat_db_to_import)
+    # work out what dbs to import
+    base_db_columns=['_item', 'accX', 'accY']
+    for db in ['cat_db', 'unknowns_db', 'fuzzy_db']:
 
-    else:
-        pd.DataFrame(columns=db_columns).to_csv('cat_db.csv', index=False)
-        addlog(loglist, 'made empty cat_db.csv')
+        db_to_load = [x for x in dbs_to_import if db in str(x)]
 
-    # tx_accounts
-    os.mkdir('tx_accounts')
-    addlog(loglist, 'made empty tx_accounts directory')
+        if len(db_to_load) > 1:
+            print(f'too many dbs named {db} in {dbs_to_import}')
+            return 1
 
-    # unknowns_db
-    pd.DataFrame(columns=db_columns).to_csv('unknowns_db.csv', index=False)
-    addlog(loglist, 'made empty unknowns_db.csv')
- 
-    # fuzzy_db
-    db_columns.append('status')
-    pd.DataFrame(columns=db_columns).to_csv('fuzzy_db.csv', index=False)
-    addlog(loglist, 'made empty fuzzy_db.csv')
+        if len(db_to_load) == 1:
+            print('found db to load:', db_to_load)
+            copy(db_to_load[0], (proj_path / (db + '.csv')))
 
-    # write out log
-    writelog(loglist)
+        else:
+            print('making empty', db)
+            cols_to_use = base_db_columns
+            if db == 'fuzzy_db':
+                cols_to_use = base_db_columns + ['status']
+            pd.DataFrame(columns=cols_to_use).to_csv((proj_path / (db + '.csv')),
+                                                index=False)
 
-    os.chdir(parent_dir)
+    # make tx_accounts dir
+    (proj_path / 'tx_accounts').mkdir()
 
-    return os.path.abspath(proj_name)
+    return proj_name
+
 

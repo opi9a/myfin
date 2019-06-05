@@ -4,9 +4,9 @@ from pathlib import Path
 import json
 from shutil import rmtree
 
-from .test_helpers import (make_dfs_from_master_xls,
-                          make_dbs_from_master_dfs,
-                          make_acc_objects)
+from .make_test_constructs import make_dbs_from_master_xlsx
+from .make_test_constructs import make_acc_objects_from_master_xlsx
+
 
 def make_test_project(master_xlsx_path,
                       project_dir,
@@ -41,18 +41,15 @@ def make_test_project(master_xlsx_path,
 
     project_dir.mkdir(parents=True)
 
-    # read raw_dfs containing all test input data from master xlsx
-    raw_dfs = make_dfs_from_master_xls(master_xlsx_path)
-
     # make dict of dbs - with 'input' and 'target' elements and write to disk
-    dbs = make_dbs_from_master_dfs(raw_dfs)
+    dbs = make_dbs_from_master_xlsx(master_xlsx_path)
 
     for db in [x for x in dbs['input'] if x.endswith('_db')]:
         path_out = project_dir / (db + '.csv')
         dbs['input'][db].to_csv(path_out, index=True)
 
     # make account objects (new_txs etc) and account directory structure
-    accounts = make_acc_objects(raw_dfs)
+    accounts = make_acc_objects_from_master_xlsx(master_xlsx_path)
 
     for acc in accounts:
         acc_path = project_dir / 'tx_accounts' / acc

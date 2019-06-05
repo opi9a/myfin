@@ -1,7 +1,8 @@
 # myfin/finance/debug_scripts/initialise_tx_account.py
 
+from pathlib import Path
 
-def initialise_tx_account(acc_path):
+def initialise_tx_account(project_path, account_name):
     """Create folder structure for a new tx_account in acc_path:
         - new_pre_csvs/
             - <any new files requiring processing to make csvs>
@@ -16,19 +17,16 @@ def initialise_tx_account(acc_path):
 
     """
 
-    # check making it in a tx_accounts dir
-    if acc_path.parent.name != 'tx_accounts':
-        print('not in a tx_accounts directory, exiting')
-        return
+    acc_path = Path(project_path).expanduser() / 'tx_accounts' / account_name
 
     if acc_path.exists():
         print(acc_path, 'already exists, exiting')
         return
 
+    print(f'making account dir at {acc_path}')
     acc_path.mkdir()
 
     # make the empty tx dirs
-    for d in ['new_pre_csvs', 'processed_pre_csvs',
-              'new_csvs', 'processed_csvs']:
+    for d in ['new_pre_csvs', 'temp_csvs', 'new_csvs', 'old_originals']:
         (acc_path / d).mkdir()
 

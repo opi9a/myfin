@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from shutil import move, copy
+from shutil import move
 from pathlib import Path
 import json
 import subprocess
@@ -13,12 +13,13 @@ from mylogger import get_filelog
 from finance.helpers.load_dbs_from_disk import load_dbs_from_disk
 
 # imports from this directory
-from .load_new_csv_files import load_new_csv_files
+from .apply_parser import apply_parser
 from .trim_df import trim_df
 from .clean_tx_df import clean_tx_df
 from .add_target_acc_col import add_target_acc_col
 from .append_to_dbs import append_to_all_dbs
 from .archive_dbs import archive_dbs
+
 
 
 def load_new_txs(acc_path, 
@@ -36,6 +37,7 @@ def load_new_txs(acc_path,
         - old_originals (new_csvs or new_pre_csvs after loading)
     """
 
+
     # PREPARATION 
     acc_path = Path(acc_path).absolute()
 
@@ -44,7 +46,8 @@ def load_new_txs(acc_path,
         return
 
     main_dir = acc_path.parents[1]
-    parser = None
+    logger = get_filelog(main_dir / 'log.txt')
+    logger.info('*'*6 + 'calling load_new_txs() for ' + acc_path.name + '*' *6)
 
     dbs = load_dbs_from_disk(main_dir)
 
@@ -53,62 +56,84 @@ def load_new_txs(acc_path,
          list((acc_path / 'new_pre_csvs').iterdir())):
 
         process_non_csv_originals(acc_path / 'new_pre_csvs')
+        logger.info('processed pre_csvs')
 
-    # get path to files ready for loading
-    if list((acc_path / 'new_csvs').iterdir()):
-        files_to_process_path = acc_path / 'new_csvs'
+    # get files ready for loading
+    if (acc_path / 'new_csvs').exists():
+        new_csv_paths = list((acc_path / 'new_csvs').iterdir())
+        if new_csv_paths:
+            files_to_process = new_csv_paths
+            logger.info(f'found {len(new_csv_paths)} files in new_csvs')
+        else:
+            logger.info(f'found no new csvs to process')
 
-    elif list((acc_path / 'temp_csvs').iterdir()):
-        files_to_process_path = acc_path / 'temp_csvs'
+    elif (acc_path / 'temp_csvs').exists():
+        temp_csv_paths = list((acc_path / 'temp_csvs').iterdir())
+        if temp_csv_paths:
+            files_to_process = temp_csv_paths
+            logger.info(f'found {len(temp_csv_paths)} files in temp_csvs')
+        else:
+            logger.info(f'found no new csvs to process')
 
     else:
         print('no new files found')
+        logger.info(f'found no new csvs to process')
         return
 
     
     # MAIN LOOP: build df of new txs; append txs to dbs as required
-    for csv_file in files_to_process_path.iterdir():
+    new_tx_count = 0
+    for csv_file in files_to_process:
+        logger.info('-'*6 + f'processing {csv_file.name}' + '-'*6)
 
         df = pd.read_csv(csv_file)
+        logger.info(f'loaded csv with {len(df)} txs')
 
         if (acc_path / 'parser.json').exists():
-            parser = json.load((acc_path / 'parser.json').open())
-            df = df[list(parser['map'].values())]
-            df.columns = parser['map'].keys()
-            df['source'] = acc_path.name
-
-            if ('net_amt' in df.columns and
-                parser.get('debit_sign', 'negative') == 'positive'):
-                df['net_amt'] *= -1
+            df = apply_parser(df, acc_path)
 
         df = clean_tx_df(df)
 
         if not 'net_amt' in df.columns:
             df['net_amt'] = (df['credit_amt']
                                  .subtract(df['debit_amt'], fill_value=0))
+            logger.info(f'made net_amts')
 
         df['accX'] = acc_path.name
         df['_item'] = df['ITEM'].apply(lambda x: x.casefold().strip())
 
         df = trim_df(df, dbs['tx_db'])
+        logger.info(f'after trim_df, {len(df)} txs')
+
         df = add_target_acc_col(df, acc_path.name, dbs)
 
         # TODO standardise column types etc
 
         dbs = append_to_all_dbs(df, dbs)
+        logger.info(f'appended to dbs')
 
+        new_tx_count += len(df)
+
+    logger.info(f'--> Total new txs for {acc_path.name}: {new_tx_count}')
 
     # CLEANING UP
     if write_out_dbs:
         for db in dbs:
             dbs[db].to_csv(main_dir / (db + '.csv'))
+            logger.info(f'writing out to {main_dir / (db + ".csv")}')
 
         archive_dbs(proj_path=main_dir, annotation='loaded_' + acc_path.name)
+        logger.info(f'archived dbs')
+
+    else:
+        logger.info(f'not writing out')
 
     if move_new_txs:
 
         for file in (acc_path / 'new_csvs').iterdir():
             move(file, acc_path / 'old_originals' / file.name)
+            logger.info(f'moved {file} to',
+                        '{acc_path / "old_originals" / file.name}')
 
         for file in (acc_path / 'new_pre_csvs').iterdir():
             move(file, acc_path / 'old_originals' / file.name)

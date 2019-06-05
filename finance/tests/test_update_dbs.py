@@ -1,4 +1,4 @@
-# myfin/finance/testing/test_update_dbs.py
+# myfin/finance/tests/test_update_dbs.py
 
 from pathlib import Path
 
@@ -6,10 +6,9 @@ from finance.update_dbs import update_dbs_after_changes
 from finance.update_dbs import update_after_changed_unknowns
 from finance.update_dbs import update_after_changed_fuzzy
 
-from .test_helpers import (db_compare,
-                          make_dfs_from_master_xls,
-                          make_dbs_from_master_dfs,
-                          print_db_dicts, print_title)
+from .db_compare import db_compare
+from .make_test_constructs import make_dbs_from_master_xlsx
+from .test_helpers import print_db_dicts, print_title
 
 MASTER_XLSX_PATH = ('~/shared/projects/myfin/'
                     'testing/xlsx_masters/update_dbs_masters/')
@@ -21,6 +20,9 @@ def test_all_update(master_xls_dir=MASTER_XLSX_PATH):
     unknowns_db.
     """
 
+    print_title('test_all_update()', borders=True, attrs=['bold'],
+                                     color='blue', char='-')
+
     master_xls_dir = Path(master_xls_dir)
 
     for db in ['unknowns_db', 'fuzzy_db']:
@@ -30,7 +32,8 @@ def test_all_update(master_xls_dir=MASTER_XLSX_PATH):
 
 
 def test_update_dbs(changed_db_name, master_xls_path, show_dbs=False,
-                    ignore_cols=['id', 'mode', 'source']):
+                    cols_to_ignore=['id', 'mode', 'source'], 
+                    assertion=True):
     """
     Makes a set of input and target dbs.  
     Then runs the input dbs through update function (specified with
@@ -41,8 +44,7 @@ def test_update_dbs(changed_db_name, master_xls_path, show_dbs=False,
 
 
     # get test and targets from master path, and by calling the function
-    dfs = make_dfs_from_master_xls(master_xls_path)
-    dbs = make_dbs_from_master_dfs(dfs)
+    dbs = make_dbs_from_master_xlsx(master_xls_path)
 
     dbs['test'] = update_dbs_after_changes(changed_db_name=changed_db_name,
                                            dbs=dbs['input'],
@@ -54,13 +56,12 @@ def test_update_dbs(changed_db_name, master_xls_path, show_dbs=False,
         print()
         
     # run the comparison
-    print()
     print_title(f'After changes in {changed_db_name}'.upper(),
                 attrs=['bold'])
 
     for db in dbs['test']:
         db_compare(dbs['test'][db], dbs['target'][db], db_name=db,
-                   ignore_cols=ignore_cols, assertion=True)
+                   cols_to_ignore=cols_to_ignore, assertion=assertion)
 
 
 if __name__ == '__main__':
