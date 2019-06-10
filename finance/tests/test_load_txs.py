@@ -21,7 +21,6 @@ TEST_PROJ_DIR = TESTING_DIR / 'test_dir/test_proj'
 def test_load_new_txs(master_xlsx_path=MASTER_XLSX_PATH,
                       test_dir=Path('test_dir/test_proj'),
                       return_dbs=False,
-                      show_dbs=False,
                       cols_to_ignore=['id', 'source', 'mode'],
                       assertion=False):
 
@@ -40,17 +39,11 @@ def test_load_new_txs(master_xlsx_path=MASTER_XLSX_PATH,
 
     # run load_new for each account, saving results to disk
     for acc_path in (test_dir / 'tx_accounts').iterdir():
-        load_new_txs(acc_path=acc_path, write_out_dbs=True, move_new_txs=False)
+        load_new_txs(acc_path=acc_path, write_out_tx_db=True, move_new_txs=False)
 
     # load from disk, creating a third element of dbs dict
     dbs['test'] = load_dbs_from_disk(test_dir)
 
-    # just print the dbs optionally
-    if show_dbs:
-        print_title('printing actual dbs'.upper(), attrs=['bold'])
-        print_db_dicts(dbs)
-        print()
-        
     # list to hold boolean results of db_compare
     results = []
 
@@ -59,7 +52,6 @@ def test_load_new_txs(master_xlsx_path=MASTER_XLSX_PATH,
         results.append(db_compare(dbs['test'][db], dbs['target'][db],
                                   db_name=db, cols_to_ignore=cols_to_ignore,
                                   assertion=assertion))
-
     if return_dbs:
         return dbs
 

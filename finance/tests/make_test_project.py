@@ -27,8 +27,6 @@ def make_test_project(master_xlsx_path,
         _______ parser.json
         __ tx_db.csv
         __ cat_db.csv
-        __ unknowns_db.csv
-        __ fuzzy_db.csv
 
     Optionally return the dbs in memory
     """
@@ -68,4 +66,3 @@ def make_test_project(master_xlsx_path,
 
     if return_dbs:
         return dbs
-

@@ -3,7 +3,6 @@
 from pathlib import Path
 import pandas as pd
 
-from .constants import DB_NAMES
 
 def load_dbs_from_disk(dir_path=Path()):
     """
@@ -14,7 +13,7 @@ def load_dbs_from_disk(dir_path=Path()):
 
     dbs = {}
 
-    for db in DB_NAMES:
+    for db in ['tx_db', 'cat_db']:
         dbs[db] = pd.read_csv(dir_path / (db + '.csv'),
                               index_col='date' if db == 'tx_db' else '_item')
 

@@ -71,49 +71,6 @@ def assign_targets(_items, account,
     return results
 
 
-def make_fuzzy_match(input_string, reference_set, threshold=55):
-
-    matches = {}
-
-    scorers = { 'ratio': fuzz.ratio,
-                # 'partial_ratio': fuzz.partial_ratio,
-                'token_set_ratio': fuzz.token_set_ratio,
-                'token_sort_ratio': fuzz.token_sort_ratio,
-              }
-
-    for scorer in scorers: 
-        matches[scorer] = process.extractOne(input_string, reference_set,
-                                             scorer=scorers[scorer])
-
-    top_hit = max(matches, key=lambda x: matches[x][1])
-
-    if matches[top_hit][1] >= threshold:
-        return matches[top_hit][0]
-
-    else:
-        return False
-
-
-def pick_match(item, account, hits, return_col='accY'):
-    """Returns match for item in sub_df of hits, giving preference for hits
-    in home account
-    """
-    # if only one match, return it
-    if len(hits) == 1:
-        return hits.loc[item,return_col]
-    
-    # if more than one, look for a hit in home account
-    if len(hits) > 1:
-        home_acc_hits = hits[hits['accX']==account]
-
-        # if any home hits, return the first - works even if multiple
-        if len(home_acc_hits) > 0:
-            return home_acc_hits.iloc[0].loc[return_col]
-
-        # if no home account hits, just return the first assigned hit
-        else:
-            return hits.iloc[0].loc[return_col]
-
 
 
 
