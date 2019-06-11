@@ -21,7 +21,7 @@ TEST_PROJ_DIR = TESTING_DIR / 'test_dir/test_proj'
 def test_load_new_txs(master_xlsx_path=MASTER_XLSX_PATH,
                       test_dir=Path('test_dir/test_proj'),
                       return_dbs=False,
-                      cols_to_ignore=['id', 'source', 'mode'],
+                      cols_to_ignore=['id', 'source'],
                       assertion=False):
 
     print_title('load_new_txs()', borders=True, attrs=['bold'],

@@ -1,4 +1,55 @@
 # myfin/finance/load_new_txs/load_new_txs.py
+"""
+Load new transactions for an account.
+
+Account directory structure:
+    - new_csvs (original csv files not needing pre-processing)
+    - new_pre_csvs (originals needing processing to csvs, eg pdfs)
+    - temp_csvs (csvs made by processing new_pre_csvs)
+    - old_originals (new_csvs or new_pre_csvs after loading)
+
+Begins with the existing tx_db (and optional cat_db external map of
+item names to categories).
+
+Looks for a 'prep.py' file to execute, to make csvs
+  - originals in new_pre_csvs/
+  - save results in temp_csvs/
+  - move originals to old_originals/
+  
+Loads csvs to a pandas df
+  - from either new_csvs/ or temp_csvs/
+
+Parses and assigns standard column headings:
+  - 'date', 'ITEM', 'source'
+  - either:
+      - 'net_amt', or
+      - 'credit_amt' and 'debit_amt'
+  - optionally: 'y_amt', 'balance'
+
+Calculates 'net_amt' if required
+
+Adds other columns:
+    - makes standardised '_item' field (lower case, stripped)
+    - adds account name ('accX')
+
+Trims overlaps vs tx_db, adding an 'id' field
+
+Adds an 'accY' target account column, by either:
+  - looking up in tx_db or cat_db
+  - making a fuzzy match
+  - todo: applying previously defined rules
+  - leaving 'unknown'
+
+Adds a 'mode' column recording how 'accY' was assigned
+  - confirmed means has been verified after load, or was looked up
+    from a tx with 'mode' == confirmed
+  - fuzzy means was assigned by fuzzy match, or was looked up
+    from a tx with 'mode' == fuzzy
+  - unknown means could not be assigned by lookup or fuzzy match
+  - TODO: mode of 'special' is not copied in lookup or fuzzy match
+
+Appends the new txs df to tx_db and writes tx_db to disk
+"""
 
 from shutil import move
 from pathlib import Path
@@ -15,107 +66,19 @@ from .get_accYs_modes import get_accYs_modes
 from .append_to_tx_db import append_to_tx_db
 from .archive_tx_db import archive_tx_db
 
+
 def load_new_txs(acc_path, return_tx_db=False, write_out_tx_db=True,
-                     move_new_txs=True, delete_temp_csvs=True):
+                 move_new_txs=True, delete_temp_csvs=True):
 
     """
+    Load the new transactions for the passed account.
 
-    **********
-    CHANGING TO TX_DB_CENTRED:
+    Appends the new txs df to tx_db and writes tx_db to disk
+    Moves originals from new_csvs/ to old_originals/
+    Deletes temp_csvs/
 
-    load_new_txs:
-        - initially load tx_db only (no fuzzy_db or unknowns_db exist)
-        - add_target_acc_col to use tx_db (and optional external cat_db)
-          - use priority system to assign
-        - append to tx_db only
-
-    add_target_acc_col:
-        apply to each new loaded tx, based on its '_item' and 'accX'
-        def get_matches():
-            get all exact matches first
-            -> if no exact match, get all fuzzy matches
-            return matches
-
-        pick from matches
-        ordering criteria:
-            '_item' only, or 'accX' too
-            mode value
-
-    Priority system:
-        Relates to weight of accY assignation for that tx
-        Recorded in 'mode' col
-        Initially assigned by add_target_acc_col
-        Can be amended programmatically (with amendment of accY)
-        (may be broadcast to many as part of amendment, but
-         no automatic broadcasting / interdependencies. Cd add later.)
-
-        Mode is vehicle for external information from assignment process:
-            mode of originating* assignment, and possible extra state:
-                fuzzy matching:
-                    no extra state, just mode
-                    (tho cd have eg scores)
-                amendment:
-                    extra state with confidence of amendment
-                absence of either
-
-            *NB mode is transitive:  reflect originating assignation,
-             not whether this was direct or indirect.  Eg if find an
-             existing fuzzy match, assign as fuzzy_matched, not
-             distinguishing old_ and new_fuzzy_matched.
-
-             Tho cd have a field for parent tx
-
-        Use for:
-            guiding future accY assignments by add_target_acc_col:
-                by exact or fuzzy match
-            selecting txs / assignations to amend (eg get all fuzzy matched)
-
-        Modes: (make arbitrarily extensible
-                 -> have a table dictating levels and rules?)
-
-            unknown:  no match when loaded
-                eg rule: do not use for matching
-
-            fuzzy_matched: assigned by fuzzy match when loaded
-                only useful for matching to increase efficiency,
-                avoid a fuzzy match
-                presume the confirmed source still there, and may be
-                new confirmed sources, with this assignment not updated?
-
-            confirmed0: (high category width)
-                use for exact and fuzzy match
-            confirmed1: (med category width)
-                use for exact but not fuzzy match
-            confirmed2: (low category width)
-                do not use for matching (flag just for selection)
-
-            new/existing confirmed?
-
-    update_dbs:
-        - only update tx_db obviously (ext cat_db?)
-        - amend tx by tx, programmatically
-            - eg with function taking 'id'
-            - can therefore use rules, mass amends, fancy indexing etc
-
-    rescan after changing?  Probably not.  In principle, rescan
-    is just one of the things that can be done.
-
-    bother with initial assignment, or just do rescans?  May as well
-    do it and can always drop.  Acting on new txs feels logically effiient,
-    will probably want to separate them out again after anyway.
-
-    **********
-
-    Function to load new transactions from input files for an account
-    at acc_path.  Called for each account.
-
-    Account file structure:
-        - new_csvs (original csv files not needing pre-processing)
-        - new_pre_csvs (originals needing processing to csvs, eg pdfs)
-        - temp_csvs (csvs made by processing new_pre_csvs)
-        - old_originals (new_csvs or new_pre_csvs after loading)
+    Optionally returns the tx_db, and does not move files or write to disk.
     """
-
 
     # PREPARATION
     acc_path = Path(acc_path).absolute()
@@ -123,7 +86,7 @@ def load_new_txs(acc_path, return_tx_db=False, write_out_tx_db=True,
     if 'tx_accounts' not in str(acc_path):
         print(f'no "tx_accounts" found in {acc_path}'
               f'- does not look like a path')
-        return
+        return None
 
     main_dir = acc_path.parents[1]
     logger = get_filelog(main_dir / 'log.txt')
@@ -143,6 +106,64 @@ def load_new_txs(acc_path, return_tx_db=False, write_out_tx_db=True,
         logger.info('processed pre_csvs')
 
     # get files ready for loading
+    files_to_process = get_files_to_process(acc_path, logger)
+
+    if files_to_process is None:
+        print('no new files found')
+        logger.info(f'found no new csvs to process')
+        return None
+
+    # MAIN LOOP: get df for each file of new txs, and append to tx_db
+    new_tx_count = 0
+    for csv_file in files_to_process:
+        df = process_new_txs_csv(csv_file, tx_db, cat_db, acc_path, logger)
+        tx_db = append_to_tx_db(df, tx_db)
+        logger.info('appended to tx_db')
+        new_tx_count += len(df)
+
+    logger.info('--> Total new txs for %s: %s', acc_path.name, new_tx_count)
+
+
+    # CLEANING UP
+    if write_out_tx_db:
+        tx_db.to_csv(main_dir / 'tx_db.csv')
+        logger.info(f'writing out to %s', main_dir / 'tx_db.csv')
+
+        archive_tx_db(proj_path=main_dir, annotation='loaded_' + acc_path.name)
+        logger.info(f'archived tx_db')
+
+    else:
+        logger.info(f'not writing out')
+
+
+    if move_new_txs:
+        for file in (acc_path / 'new_csvs').iterdir():
+            move(file, acc_path / 'old_originals' / file.name)
+            logger.info(f'moved {file} to'
+                        f'{acc_path / "old_originals" / file.name}')
+
+        for file in (acc_path / 'new_pre_csvs').iterdir():
+            move(file, acc_path / 'old_originals' / file.name)
+
+
+    if delete_temp_csvs and (acc_path / 'temp_csvs').exists():
+        for file in (acc_path / 'temp_csvs').iterdir():
+            file.unlink()
+
+
+    if return_tx_db:
+        return tx_db
+
+
+def get_files_to_process(acc_path, logger):
+    """
+    Looks for files to process, including in new_csvs/ and temp_csvs/.
+
+    Returns a list of Path objects ready for loading.
+    """
+
+    files_to_process = None
+
     if (acc_path / 'new_csvs').exists():
         new_csv_paths = list((acc_path / 'new_csvs').iterdir())
         if new_csv_paths:
@@ -159,76 +180,42 @@ def load_new_txs(acc_path, return_tx_db=False, write_out_tx_db=True,
         else:
             logger.info(f'found no new csvs to process')
 
-    else:
-        print('no new files found')
-        logger.info(f'found no new csvs to process')
-        return
-
-    # MAIN LOOP: build df of new txs; append txs to dbs as required
-    new_tx_count = 0
-    for csv_file in files_to_process:
-        logger.info('------ processing %s ------', csv_file.name)
-
-        df = pd.read_csv(csv_file)
-        logger.info('loaded csv with %s txs', len(df))
-
-        if (acc_path / 'parser.json').exists():
-            print('calling apply_parser')
-            df = apply_parser(df, acc_path)
-
-        df = clean_tx_df(df)
-
-        if not 'net_amt' in df.columns:
-            df['net_amt'] = (df['credit_amt']
-                             .subtract(df['debit_amt'], fill_value=0))
-            logger.info('made net_amts')
-
-        df['accX'] = acc_path.name
-        df['_item'] = df['ITEM'].apply(lambda x: x.casefold().strip())
-
-        df = trim_df(df, tx_db)
-        logger.info('after trim_df, %s txs', len(df))
-
-        accYs, modes = get_accYs_modes(df['_item'],
-                                       acc_path.name, tx_db, cat_db)
-        df['accY'] = accYs
-        df['mode'] = modes
+    return files_to_process
 
 
-        # TODO standardise column types etc
 
-        tx_db = append_to_tx_db(df, tx_db)
-        logger.info('appended to tx_db')
+def process_new_txs_csv(csv_file, tx_db, cat_db, acc_path, logger):
+    """
+    Load and process a individual csv_file, using tx_db and cat_db
+    as sources for assigning accY.
 
-        new_tx_count += len(df)
+    Return a df ready for appending to tx_db.
+    """
+    logger.info('------ processing %s ------', csv_file.name)
 
-    logger.info('--> Total new txs for %s: %s', acc_path.name, new_tx_count)
+    df = pd.read_csv(csv_file)
+    logger.info('loaded csv with %s txs', len(df))
 
-    # CLEANING UP
-    if write_out_tx_db:
-        tx_db.to_csv(main_dir / 'tx_db.csv')
-        logger.info(f'writing out to %s', main_dir / 'tx_db.csv')
+    if (acc_path / 'parser.json').exists():
+        df = apply_parser(df, acc_path)
 
-        archive_tx_db(proj_path=main_dir, annotation='loaded_' + acc_path.name)
-        logger.info(f'archived tx_db')
+    df = clean_tx_df(df)
 
-    else:
-        logger.info(f'not writing out')
+    if not 'net_amt' in df.columns:
+        df['net_amt'] = (df['credit_amt']
+                         .subtract(df['debit_amt'], fill_value=0))
+        logger.info('made net_amts')
 
-    if move_new_txs:
+    df['accX'] = acc_path.name
+    df['_item'] = df['ITEM'].apply(lambda x: x.casefold().strip())
 
-        for file in (acc_path / 'new_csvs').iterdir():
-            move(file, acc_path / 'old_originals' / file.name)
-            logger.info(f'moved {file} to'
-                        f'{acc_path / "old_originals" / file.name}')
+    df = trim_df(df, tx_db)
+    logger.info('after trim_df, %s txs', len(df))
 
-        for file in (acc_path / 'new_pre_csvs').iterdir():
-            move(file, acc_path / 'old_originals' / file.name)
+    accYs, modes = get_accYs_modes(df['_item'],
+                                   acc_path.name, tx_db, cat_db)
+    df['accY'] = accYs
+    df['mode'] = modes
 
-    if delete_temp_csvs and (acc_path / 'temp_csvs').exists():
-
-        for file in (acc_path / 'temp_csvs').iterdir():
-            file.unlink()
-
-    if return_tx_db:
-        return tx_db
+    # TODO standardise column types etc
+    return df

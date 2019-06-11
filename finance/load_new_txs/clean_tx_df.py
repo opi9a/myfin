@@ -15,5 +15,3 @@ def clean_tx_df(df):
             df[label] = pd.to_numeric(df[label], errors='coerce')
 
     return df
-
-
