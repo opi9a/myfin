@@ -1,21 +1,77 @@
 # myfin/finance/rules/Rule.py
+"""
+The Rule class carries information to execute an amendment of a tx db.
+
+It comprises:
+
+    - an optional rule_id
+        - eg 'rule1'
+
+    - an arbitrary number of Selection conditions which can be used to
+      make a mask for filtering the tx_db, and selecting the rows to be
+      amended.
+
+      eg: [ Selection('column'='accX',
+                      'operation'='equals',
+                      'term'='acc1'),
+                      ),
+            Selection('column'='_item',
+                      'operation'='contains',
+                      'term'='orange'),
+                      ),
+          ]
+
+    - a list of columns to be changed
+        - eg ['accY', 'mode']
+
+    - a list of new values for the columns to be changed
+        - eg ['new_accY', 'assigned_by_rule1']
+
+The component Selection class is a namedtuple with the fields:
+    - 'column'   # the column of the tx_db to interrogate
+    - 'operation'# the logical operation to use, from:
+        - 'equals'
+        - 'not_equals',
+        - 'contains',
+        - 'not_contains'
+    - 'term'     # the other input to the logical comparison
+
+JSON SERIALIZING
+
+A rule object can be serialized with its __dict__ attribute:
+
+    >>> rule = Rule('r1',
+                    [Selection('accX', 'equals', 'acc1')],
+                    ['accY', 'mode'],
+                    ['newY', 'new_mode'])
+
+    >>> rule_json = json.dumps(rule.__dict__)
+
+    >>> rule_regen = rule_from_json(rule_json)
+
+    >>> rule_json == rule
+    True
+"""
 
 from collections import namedtuple
+import json
+
 
 Selection = namedtuple('selection', 'column operation term')
+
 
 class Rule:
     """
     class Rule:
         name, optional
         selections # a list of conditions, together making a mask for tx_db
-        col_to_change
-        new_val
+        cols_to_change
+        new_vals
 
     """
 
     def __init__(self, rule_id=None, selections=None,
-                 col_to_change=None, new_val=None):
+                 cols_to_change=None, new_vals=None):
         """
         A list of selector_cols, with selection parameters, identifies
         the rows to change.
@@ -23,7 +79,6 @@ class Rule:
 
         self.rule_id = rule_id
 
-        print('type', type(selections))
         if selections is None:
             self.selections = []
         elif not isinstance(selections, list):
@@ -32,8 +87,8 @@ class Rule:
         else:
             self.selections = selections
 
-        self.col_to_change = col_to_change
-        self.new_val = new_val
+        self.cols_to_change = cols_to_change
+        self.new_vals = new_vals
 
 
     def __repr__(self):
@@ -63,7 +118,7 @@ class Rule:
             line_str.append("Selection(")
             line_str.append(f'"{s.column}", "{s.operation}", "{s.term}")')
 
-            if i == len(line_str) - 1:
+            if i == len(self.selections) - 1:
                 line_str.append("],")
             else:
                 line_str.append(",")
@@ -72,18 +127,18 @@ class Rule:
 
         repr_args.append("\n".join(sel_strs))
 
-        if self.col_to_change is not None:
-            col_to_change = f'"{self.col_to_change}",'
+        if self.cols_to_change is not None:
+            cols_to_change = f'{self.cols_to_change},'
         else:
-            col_to_change = f'None,'
-        repr_args.append(''.ljust(pad1) + 'col_to_change=' + col_to_change)
+            cols_to_change = f'None,'
+        repr_args.append(''.ljust(pad1) + 'cols_to_change=' + cols_to_change)
 
-        if self.new_val is not None:
-            new_val = f'"{self.new_val}")'
+        if self.new_vals is not None:
+            new_vals = f'{self.new_vals})'
         else:
-            new_val = f'None)'
+            new_vals = f'None)'
 
-        repr_args.append(''.ljust(pad1) + 'new_val=' + new_val)
+        repr_args.append(''.ljust(pad1) + 'new_vals=' + new_vals)
 
         return "\n".join(repr_args)
 
@@ -108,25 +163,43 @@ class Rule:
             sel_strs.append(" ".join(line_str))
 
         str_args.append("\n".join(sel_strs))
-        str_args.append('col_to_change:'.ljust(pad) + str(self.col_to_change))
-        str_args.append('new_val:'.ljust(pad) + str(self.new_val))
+        str_args.append('cols_to_change:'.ljust(pad) + str(self.cols_to_change))
+        str_args.append('new_vals:'.ljust(pad) + str(self.new_vals))
 
         return "\n".join(str_args)
 
 
-    def add_selection(self, column, operation, term):
+    def __eq__(self, other):
         """
-        namedtuple Selection:
-            column, eg '_item'
-            operation, from ['equals', 'not_equals', 'contains', 'not_contains']
-            term, eg 'LNK'  # leave case-sensitive, allow searching of 'ITEM'
+        Just compare all attributes
         """
 
-        if operation not in ['equals', 'not_equals',
-                             'contains', 'not_contains']:
+        return all([self.rule_id == other.rule_id,
+                    self.selections == other.selections,
+                    self.cols_to_change == other.cols_to_change,
+                    self.new_vals == other.new_vals])
 
-            raise ValueError(f'selection operation {operation} not recognized')
 
-        selection = Selection(column=column, operation=operation, term=term)
+        
 
-        self.selections.append(selection)
+
+def rule_from_json(rule_json):
+    """
+    Returns a Rule object from a passed json string.
+    """
+
+    rule_dict = json.loads(rule_json)
+
+    return Rule(rule_id=rule_dict['rule_id'],
+                selections=[Selection(*x) for x in rule_dict['selections']],
+                cols_to_change=rule_dict['cols_to_change'],
+                new_vals=rule_dict['new_vals'],
+               )
+
+
+TEST_RULE = Rule(rule_id='test_rule',
+                 selections=[Selection('accX', 'equals', 'acc1'),
+                             Selection('_item', 'contains', 'orange')],
+                 cols_to_change=['accY', 'mode'],
+                 new_vals=['new_Y', 'new_mode'])
+
