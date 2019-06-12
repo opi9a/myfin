@@ -8,7 +8,7 @@ def clean_tx_df(df):
     Make sure imported columns are sanitary.
     """
 
-    df['date'] = pd.DatetimeIndex(df['date'])
+    df['date'] = pd.DatetimeIndex(df['date'], dayfirst=True)
 
     for label in ['net_amt', 'debit_amt', 'credit_amt']:
         if label in df.columns:
