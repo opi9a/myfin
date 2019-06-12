@@ -2,6 +2,10 @@
 """
 The Rule class carries information to execute an amendment of a tx db.
 
+It can be serialized to json.
+
+RULE CLASS
+
 It comprises:
 
     - an optional rule_id
@@ -27,6 +31,9 @@ It comprises:
     - a list of new values for the columns to be changed
         - eg ['new_accY', 'assigned_by_rule1']
 
+
+SELECTION CLASS
+
 The component Selection class is a namedtuple with the fields:
     - 'column'   # the column of the tx_db to interrogate
     - 'operation'# the logical operation to use, from:
@@ -36,9 +43,10 @@ The component Selection class is a namedtuple with the fields:
         - 'not_contains'
     - 'term'     # the other input to the logical comparison
 
+
 JSON SERIALIZING
 
-A rule object can be serialized with its __dict__ attribute:
+A Rule object can be serialized with its __dict__ attribute:
 
     >>> rule = Rule('r1',
                     [Selection('accX', 'equals', 'acc1')],
@@ -49,7 +57,7 @@ A rule object can be serialized with its __dict__ attribute:
 
     >>> rule_regen = rule_from_json(rule_json)
 
-    >>> rule_json == rule
+    >>> rule_regen == rule
     True
 """
 
