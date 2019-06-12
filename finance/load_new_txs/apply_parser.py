@@ -17,7 +17,7 @@ def apply_parser(df, acc_path):
     """
 
     logger = get_filelog(acc_path.parents[1] / 'log.txt')
-    logger.info('calling apply_parser() for %s', acc_path.name)
+    logger.info('calling apply_parser() for {acc_path.name}')
 
     parser = json.load((acc_path / 'parser.json').open())
 
