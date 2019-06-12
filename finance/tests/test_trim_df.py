@@ -18,7 +18,9 @@ def test_trim_df(master_xlsx_path=MASTER_XLSX_PATH, assertion=False,
     Uses dfs derived from a master xlsx to test the trim_df function.
     """
 
-    print_title('Testing trim_df()')
+    print_title('trim_df()', borders=False, attrs=['bold'],
+                                          color='magenta', char='-')
+
     print('\nMaking dbs from xls master at', master_xlsx_path)
     dbs = make_dbs_from_master_xlsx(master_xlsx_path)
 

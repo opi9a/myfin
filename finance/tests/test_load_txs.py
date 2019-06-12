@@ -24,7 +24,7 @@ def test_load_new_txs(master_xlsx_path=MASTER_XLSX_PATH,
                       cols_to_ignore=['id', 'source'],
                       assertion=False):
 
-    print_title('load_new_txs()', borders=True, attrs=['bold'],
+    print_title('load_new_txs()', borders=False, attrs=['bold'],
                                       color='magenta', char='-')
 
     ts = pd.datetime.now().strftime("%Y%m%d_%H%M%S")

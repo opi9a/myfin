@@ -1,7 +1,12 @@
 # myfin/testing/test_all.py
+"""
+Script to call all tests
+"""
 
 from .test_load_txs import test_load_new_txs
-from .test_update_dbs import test_all_update
+from .test_trim_df import test_trim_df
+from .test_get_accYs_modes import test_get_accYs_modes
+from .test_amend_db import test_amend_db
 
 def test_all():
     """
@@ -9,4 +14,6 @@ def test_all():
     """
 
     test_load_new_txs()
-    test_all_update()
+    test_trim_df()
+    test_get_accYs_modes()
+    test_amend_db()
