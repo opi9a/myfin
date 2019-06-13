@@ -4,8 +4,8 @@ Functions to test the amend_db() function, which applies a rule to
 amend a dataframe of transactions.
 """
 
-from finance.rules.amend_db import amend_db
-from finance.rules.Rule import Selection, Rule
+from finance.update.amend_db import amend_db
+from finance.update.Rule import Selection, Rule
 
 from finance.tests.db_compare import db_compare
 from finance.tests.test_helpers import print_title
@@ -85,3 +85,4 @@ def get_rules(master_xls_path):
                          )
                     )
     return rules
+

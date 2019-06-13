@@ -1,4 +1,4 @@
-# myfin/finance/rules/amend_db.py
+# myfin/finance/update/amend_db.py
 
 """
 GENERAL PATTERN
@@ -16,13 +16,11 @@ Use the mask to split this bit off as a copy.
 Apply the new values
 
 Add back to the tx_db and return
-
-fl
 """
 
 import pandas as pd
 
-from finance.rules.Rule import Rule, Selection
+from finance.update.Rule import Rule, Selection
 
 def amend_db(df, rule):
     """
@@ -44,7 +42,7 @@ def make_mask(selections, df):
     Turn the passed selections into a mask for filtering the passed df
     """
 
-    mask_out = True
+    mask_out = pd.Series([True] * len(df), index=df.index)
 
     for s in selections:
 

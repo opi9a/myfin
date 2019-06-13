@@ -1,4 +1,4 @@
-# myfin/finance/rules/__init__.py
+# myfin/finance/update/__init__.py
 
 """
 Want rules / selections to be serializable, searchable
@@ -29,3 +29,4 @@ higher order:
         implement rules
 
 """
+

@@ -1,4 +1,4 @@
-# myfin/finance/rules/Rule.py
+# myfin/finance/update/Rule.py
 """
 The Rule class carries information to execute an amendment of a tx db.
 
